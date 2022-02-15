@@ -92,7 +92,7 @@ merge newbranch`},
 	}
 
 	ctx1 := context.Background()
-	re1 := NewRenderEngine(ctx1)
+	re1, _ := NewRenderEngine(ctx1)
 	defer re1.Cancel()
 	for _, tt := range cases {
 		t.Run("", func(t *testing.T) {
@@ -118,8 +118,7 @@ func BenchmarkRenderEngine_Render(b *testing.B) {
     B-->D;
     C-->D;`
 	ctx1 := context.Background()
-	re1 := NewRenderEngine(ctx1)
-	_ = re1.Init()
+	re1, _ := NewRenderEngine(ctx1)
 	for i := 0; i < b.N; i++ {
 		_, _ = re1.Render(case1)
 	}

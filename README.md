@@ -1,37 +1,50 @@
-# Mermaid.go
+# mermaid.go
 
-[Mermaid.go][] is a library for invoking [mermaid.js][] and getting rending result.
+[mermaid.go][] is a library for invoking [mermaid.js][] and getting rending result.
 
 ```mermaid
 sequenceDiagram
-    participant A as User Code
+    Actor A as User
     participant B as mermaid.go
     participant C as chromedp
 
-    A ->> B: Init()
-    B ->>+ C: Eval JS Library
-    C -->>- B: 
+    A ->>+ B: NewRenderEngine()
+    B ->>+ C: Lanch new instance of chrome and eval JS library
+    C -->> B: 
+    B -->> A: 
+    
+    loop Render Process
+        A ->> B: Render()
+        B ->> C: mermaid.render()
+        C ->> B: { svg, exceptions }
+        B ->> A: Result{ Svg, Error }
+    end
 
-    A ->>+ B: Render()
-    B ->>+ C: mermaid.render()
-    C ->> C: JS library execution
-    C ->>- B: { SVG, Excception }
-    B ->>- A: Result{ Svg, Error }
+    A ->> B: Cancel()
+    B -->> C: Context done
+    C -->>- C: Shutdown chrome instance
+    B -->>- A: 
+```
+
+Installation:
+
+```shell
+go get -u github.com/dreampuf/mermaid.go
 ```
 
 Example: 
 
 ```go
-ctx1 := context.Background()
-re1 := NewRenderEngine(ctx1)
-defer re1.Cancel()
+ctx := context.Background()
+re, _ := mermaid_go.NewRenderEngine(ctx)
+defer re.Cancel()
+
 content := `graph TD;
     A-->B;
     A-->C;
     B-->D;
     C-->D;`
-
-svg_content, _ := re1.Render(content)
+svg_content, _ := re.Render(content)
 ```
 
 # How to build
@@ -43,5 +56,13 @@ svg_content, _ := re1.Render(content)
 3. Test it  
    `go test ./...`
 
-[Mermaid.go]: https://github.com/dreampuf/mermaid.go
+# License
+
+- [mermaid.go][]: MIT License
+- [mermaid.js][]: MIT License
+- [chromedp]: MIT License
+ 
+[mermaid.go]: https://github.com/dreampuf/mermaid.go
 [mermaid.js]: https://mermaid-js.github.io/mermaid/
+[chromedp]: https://github.com/chromedp/chromedp
+
