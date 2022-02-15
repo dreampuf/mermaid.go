@@ -43,5 +43,5 @@ svg_content, _ := re1.Render(content)
 3. Test it  
    `go test ./...`
 
-Mermaid.go: https://github.com/dreampuf/mermaid.go
-mermaid.js: https://mermaid-js.github.io/mermaid/
+[Mermaid.go]: https://github.com/dreampuf/mermaid.go
+[mermaid.js]: https://mermaid-js.github.io/mermaid/
