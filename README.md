@@ -44,7 +44,11 @@ content := `graph TD;
     A-->C;
     B-->D;
     C-->D;`
+
+// get the render result in SVG/XML string
 svg_content, _ := re.Render(content)
+// get the result as PNG bytes
+png_in_bytes, _ := re.RenderAsPng(content)
 ```
 
 # How to build
