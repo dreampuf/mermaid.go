@@ -11,7 +11,7 @@ import (
 //go:embed mermaid.min.js
 var SOURCE_MERMAID string
 
-var DEFAULT_PAGE string = `data:text/html,<!DOCTYPE html>
+var DEFAULT_PAGE = `data:text/html,<!DOCTYPE html>
 <html lang="en">
     <head><meta charset="utf-8"></head>
     <body></body>
@@ -48,6 +48,17 @@ func (r *RenderEngine) Render(content string) (string, error) {
 		chromedp.Evaluate(fmt.Sprintf("mermaid.render('mermaid', `%s`);", content), &result),
 	)
 	return result, err
+}
+
+func (r *RenderEngine) RenderAsPng(content string) ([]byte, error) {
+	var (
+		result_in_bytes []byte
+	)
+	err := chromedp.Run(r.ctx,
+		chromedp.Evaluate(fmt.Sprintf("document.body.innerHTML = mermaid.render('mermaid', `%s`);", content), nil),
+		chromedp.Screenshot("#mermaid", &result_in_bytes, chromedp.ByID),
+	)
+	return result_in_bytes, err
 }
 
 func (r *RenderEngine) Cancel() {

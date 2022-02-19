@@ -2,6 +2,7 @@ package mermaid_go
 
 import (
 	"context"
+	"net/http"
 	"strings"
 	"testing"
 )
@@ -106,6 +107,20 @@ merge newbranch`},
 			}
 			if !strings.HasPrefix(got, "<svg") {
 				t.Errorf("Render() got = %v", got)
+			}
+			//t.Log(got)
+
+			result_in_bytes, err := re1.RenderAsPng(tt.content)
+			if err != nil {
+				if strings.HasPrefix(err.Error(), tt.err_has_prefix) {
+					return
+				}
+				t.Errorf("Render() error = %v", err)
+				return
+			}
+			content_type := http.DetectContentType(result_in_bytes)
+			if content_type != "image/png" {
+				t.Errorf("RenderAsPng() return an '%s' rather than 'image/png'", content_type)
 			}
 		})
 	}
