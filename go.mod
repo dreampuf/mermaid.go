@@ -3,8 +3,11 @@ module github.com/dreampuf/mermaid.go
 go 1.17
 
 require (
-	github.com/chromedp/cdproto v0.0.0-20220131204822-e6abebe7b8cd // indirect
-	github.com/chromedp/chromedp v0.7.7 // indirect
+	github.com/chromedp/cdproto v0.0.0-20220131204822-e6abebe7b8cd
+	github.com/chromedp/chromedp v0.7.7
+)
+
+require (
 	github.com/chromedp/sysutil v1.0.0 // indirect
 	github.com/gobwas/httphead v0.1.0 // indirect
 	github.com/gobwas/pool v0.2.1 // indirect
