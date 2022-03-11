@@ -16,8 +16,8 @@ sequenceDiagram
     loop Render Process
         A ->> B: Render()
         B ->> C: mermaid.render()
-        C ->> B: { svg, exceptions }
-        B ->> A: Result{ Svg, Error }
+        C ->> B: { svg, boxModel, exceptions }
+        B ->> A: Result{ Svg, BoxModel Error }
     end
 
     A ->> B: Cancel()
@@ -48,7 +48,7 @@ content := `graph TD;
 // get the render result in SVG/XML string
 svg_content, _ := re.Render(content)
 // get the result as PNG bytes
-png_in_bytes, _ := re.RenderAsPng(content)
+png_in_bytes, box, _ := re.RenderAsPng(content)
 ```
 
 # How to build

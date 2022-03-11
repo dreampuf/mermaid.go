@@ -110,13 +110,16 @@ merge newbranch`},
 			}
 			//t.Log(got)
 
-			result_in_bytes, err := re1.RenderAsPng(tt.content)
+			result_in_bytes, box, err := re1.RenderAsPng(tt.content)
 			if err != nil {
 				if strings.HasPrefix(err.Error(), tt.err_has_prefix) {
 					return
 				}
 				t.Errorf("Render() error = %v", err)
 				return
+			}
+			if box.Width < 1 || box.Height < 1 {
+				t.Errorf("Render() got empty image = w:%d, h:%d)", box.Width, box.Height)
 			}
 			content_type := http.DetectContentType(result_in_bytes)
 			if content_type != "image/png" {

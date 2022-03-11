@@ -5,6 +5,7 @@ import (
 	_ "embed"
 	"errors"
 	"fmt"
+	"github.com/chromedp/cdproto/dom"
 	"github.com/chromedp/chromedp"
 )
 
@@ -18,6 +19,8 @@ var DEFAULT_PAGE = `data:text/html,<!DOCTYPE html>
 </html>`
 
 var ERR_MERMAID_NOT_READY = errors.New("mermaid.js initial failed")
+
+type BoxModel = dom.BoxModel
 
 type RenderEngine struct {
 	ctx    context.Context
@@ -50,15 +53,17 @@ func (r *RenderEngine) Render(content string) (string, error) {
 	return result, err
 }
 
-func (r *RenderEngine) RenderAsPng(content string) ([]byte, error) {
+func (r *RenderEngine) RenderAsPng(content string) ([]byte, *BoxModel, error) {
 	var (
 		result_in_bytes []byte
+		model           *dom.BoxModel
 	)
 	err := chromedp.Run(r.ctx,
 		chromedp.Evaluate(fmt.Sprintf("document.body.innerHTML = mermaid.render('mermaid', `%s`);", content), nil),
 		chromedp.Screenshot("#mermaid", &result_in_bytes, chromedp.ByID),
+		chromedp.Dimensions("#mermaid", &model, chromedp.ByID),
 	)
-	return result_in_bytes, err
+	return result_in_bytes, interface{}(model).(*BoxModel), err
 }
 
 func (r *RenderEngine) Cancel() {
