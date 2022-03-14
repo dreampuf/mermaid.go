@@ -34,7 +34,7 @@ func NewRenderEngine(ctx context.Context, statements ...string) (*RenderEngine, 
 	)
 	actions := []chromedp.Action{
 		chromedp.Navigate(DEFAULT_PAGE),
-		chromedp.EmulateViewport(1920, 1080, chromedp.EmulateScale(2)),
+		chromedp.EmulateViewport(1920, 1080, chromedp.EmulateScale(3)),
 		chromedp.Evaluate(SOURCE_MERMAID, &lib_ready),
 	}
 	for _, stmt := range statements {
