@@ -9,8 +9,8 @@ import (
 
 func TestRenderEngine_Render(t *testing.T) {
 	cases := []struct {
-		content /*, result */ string
-		err_has_prefix        string
+		content/*, result */ string
+		err_has_prefix string
 	}{
 		{content: `graph TD;
     A-->B;
@@ -125,6 +125,7 @@ merge newbranch`},
 			if content_type != "image/png" {
 				t.Errorf("RenderAsPng() return an '%s' rather than 'image/png'", content_type)
 			}
+			// t.Logf("err: %s", ioutil.WriteFile(t.Name()+".png", result_in_bytes, 0655))
 		})
 	}
 }
