@@ -9,8 +9,8 @@ import (
 
 func TestRenderEngine_Render(t *testing.T) {
 	cases := []struct {
-		content/*, result */ string
-		err_has_prefix string
+		content /*, result */ string
+		err_has_prefix        string
 	}{
 		{content: `graph TD;
     A-->B;
@@ -93,7 +93,7 @@ merge newbranch`},
 	}
 
 	ctx1 := context.Background()
-	re1, _ := NewRenderEngine(ctx1)
+	re1, _ := NewRenderEngine(ctx1, `mermaid.initialize({'theme': 'base', 'themeVariables': { 'primaryColor': '#1473e6'}});`)
 	defer re1.Cancel()
 	for _, tt := range cases {
 		t.Run("", func(t *testing.T) {

@@ -27,13 +27,19 @@ type RenderEngine struct {
 	cancel context.CancelFunc
 }
 
-func NewRenderEngine(ctx context.Context) (*RenderEngine, error) {
+func NewRenderEngine(ctx context.Context, statements ...string) (*RenderEngine, error) {
 	ctx, cancel := chromedp.NewContext(ctx)
-	var lib_ready bool
-	err := chromedp.Run(ctx,
+	var (
+		lib_ready bool
+	)
+	actions := []chromedp.Action{
 		chromedp.Navigate(DEFAULT_PAGE),
 		chromedp.Evaluate(SOURCE_MERMAID, &lib_ready),
-	)
+	}
+	for _, stmt := range statements {
+		actions = append(actions, chromedp.Evaluate(stmt, nil))
+	}
+	err := chromedp.Run(ctx, actions...)
 	if err == nil && !lib_ready {
 		err = ERR_MERMAID_NOT_READY
 	}
