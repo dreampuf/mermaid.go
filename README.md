@@ -1,6 +1,6 @@
 # mermaid.go
 
-[mermaid.go][] is a library for invoking [mermaid.js][] and getting rending result.
+[mermaid.go][] is a library for invoking [mermaid.js](https://github.com/mermaid-js/mermaid) and getting rending result.
 
 ```mermaid
 sequenceDiagram
