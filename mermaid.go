@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"github.com/chromedp/cdproto/dom"
+	"github.com/chromedp/cdproto/runtime"
 	"github.com/chromedp/chromedp"
 )
 
@@ -30,7 +31,7 @@ type RenderEngine struct {
 func NewRenderEngine(ctx context.Context, statements ...string) (*RenderEngine, error) {
 	ctx, cancel := chromedp.NewContext(ctx)
 	var (
-		lib_ready bool
+		lib_ready *runtime.RemoteObject
 	)
 	actions := []chromedp.Action{
 		chromedp.Navigate(DEFAULT_PAGE),
@@ -40,7 +41,7 @@ func NewRenderEngine(ctx context.Context, statements ...string) (*RenderEngine, 
 		actions = append(actions, chromedp.Evaluate(stmt, nil))
 	}
 	err := chromedp.Run(ctx, actions...)
-	if err == nil && !lib_ready {
+	if err == nil && lib_ready.ObjectID != "" {
 		err = ERR_MERMAID_NOT_READY
 	}
 	return &RenderEngine{
