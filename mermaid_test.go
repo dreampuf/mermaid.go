@@ -121,9 +121,9 @@ merge newbranch`},
 				}
 			}
 			if box == nil {
-				t.Errorf("Render() returned an empty box")
+				t.Errorf("RenderAsPng() returned an empty box")
 			} else if box.Width < 1 || box.Height < 1 {
-				t.Errorf("Render() got empty image = w:%d, h:%d)", box.Width, box.Height)
+				t.Errorf("RenderAsPng() got empty image = w:%d, h:%d)", box.Width, box.Height)
 			}
 			content_type := http.DetectContentType(result_in_bytes)
 			if content_type != "image/png" {

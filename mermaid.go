@@ -66,7 +66,7 @@ func (r *RenderEngine) RenderAsPng(content string) ([]byte, *BoxModel, error) {
 		model           *dom.BoxModel
 	)
 	err := chromedp.Run(r.ctx,
-		chromedp.Evaluate(fmt.Sprintf("document.body.innerHTML = mermaid.render('mermaid', `%s`);", content), nil),
+		chromedp.Evaluate(fmt.Sprintf("mermaid.render('mermaid', `%s`).then(({ svg }) => { document.body.innerHTML = svg; });", content), nil),
 		chromedp.Screenshot("#mermaid", &result_in_bytes, chromedp.ByID),
 		chromedp.Dimensions("#mermaid", &model, chromedp.ByID),
 	)
