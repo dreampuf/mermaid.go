@@ -89,7 +89,7 @@ merge newbranch`},
     C-->D;`},
 		{content: `graph TD;
     A-->B['name'];
-    A-->;`, err_has_prefix: "exception \"Uncaught\""},
+    A-->;`, err_has_prefix: "json: cannot unmarshal object into Go value of type string"},
 	}
 
 	ctx1 := context.Background()
