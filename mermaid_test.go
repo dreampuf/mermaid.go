@@ -89,7 +89,7 @@ merge newbranch`},
     C-->D;`},
 		{content: `graph TD;
     A-->B['name'];
-    A-->;`, err_has_prefix: "json: cannot unmarshal object into Go value of type string"},
+    A-->;`, err_has_prefix: `exception "Uncaught`},
 	}
 
 	ctx1 := context.Background()
@@ -111,7 +111,6 @@ merge newbranch`},
 			if !strings.HasPrefix(got, "<svg") {
 				t.Errorf("Render() got = %v", got)
 			}
-			//t.Log(got)
 
 			result_in_bytes, box, err := re1.RenderAsPng(tt.content)
 			if err != nil {
