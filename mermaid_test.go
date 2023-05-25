@@ -9,8 +9,8 @@ import (
 
 func TestRenderEngine_Render(t *testing.T) {
 	cases := []struct {
-		content /*, result */ string
-		err_has_prefix        string
+		content/*, result */ string
+		err_has_prefix string
 	}{
 		{content: `graph TD;
     A-->B;
@@ -93,17 +93,20 @@ merge newbranch`},
 	}
 
 	ctx1 := context.Background()
-	re1, _ := NewRenderEngine(ctx1, `mermaid.initialize({'theme': 'base', 'themeVariables': { 'primaryColor': '#1473e6'}});`)
+	re1, err := NewRenderEngine(ctx1, `mermaid.initialize({'theme': 'base', 'themeVariables': { 'primaryColor': '#1473e6'}});`)
+	if err != nil {
+		t.Errorf("NewRenderEngine() error = %v", err)
+	}
+
 	defer re1.Cancel()
 	for _, tt := range cases {
 		t.Run("", func(t *testing.T) {
 			got, err := re1.Render(tt.content)
 			if err != nil {
-				if strings.HasPrefix(err.Error(), tt.err_has_prefix) {
+				if !strings.HasPrefix(err.Error(), tt.err_has_prefix) {
+					t.Errorf("Render() error = %v", err)
 					return
 				}
-				t.Errorf("Render() error = %v", err)
-				return
 			}
 			if !strings.HasPrefix(got, "<svg") {
 				t.Errorf("Render() got = %v", got)
@@ -112,13 +115,14 @@ merge newbranch`},
 
 			result_in_bytes, box, err := re1.RenderAsPng(tt.content)
 			if err != nil {
-				if strings.HasPrefix(err.Error(), tt.err_has_prefix) {
+				if !strings.HasPrefix(err.Error(), tt.err_has_prefix) {
+					t.Errorf("Render() error = %v", err)
 					return
 				}
-				t.Errorf("Render() error = %v", err)
-				return
 			}
-			if box.Width < 1 || box.Height < 1 {
+			if box == nil {
+				t.Errorf("Render() returned an empty box")
+			} else if box.Width < 1 || box.Height < 1 {
 				t.Errorf("Render() got empty image = w:%d, h:%d)", box.Width, box.Height)
 			}
 			content_type := http.DetectContentType(result_in_bytes)
