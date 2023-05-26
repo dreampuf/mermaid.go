@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"github.com/chromedp/cdproto/dom"
+	"github.com/chromedp/cdproto/runtime"
 	"github.com/chromedp/chromedp"
 )
 
@@ -30,7 +31,7 @@ type RenderEngine struct {
 func NewRenderEngine(ctx context.Context, statements ...string) (*RenderEngine, error) {
 	ctx, cancel := chromedp.NewContext(ctx)
 	var (
-		lib_ready bool
+		lib_ready *runtime.RemoteObject
 	)
 	actions := []chromedp.Action{
 		chromedp.Navigate(DEFAULT_PAGE),
@@ -40,7 +41,7 @@ func NewRenderEngine(ctx context.Context, statements ...string) (*RenderEngine, 
 		actions = append(actions, chromedp.Evaluate(stmt, nil))
 	}
 	err := chromedp.Run(ctx, actions...)
-	if err == nil && !lib_ready {
+	if err == nil && lib_ready.ObjectID != "" {
 		err = ERR_MERMAID_NOT_READY
 	}
 	return &RenderEngine{
@@ -54,7 +55,9 @@ func (r *RenderEngine) Render(content string) (string, error) {
 		result string
 	)
 	err := chromedp.Run(r.ctx,
-		chromedp.Evaluate(fmt.Sprintf("mermaid.render('mermaid', `%s`);", content), &result),
+		chromedp.Evaluate(fmt.Sprintf("mermaid.render('mermaid', `%s`).then(({ svg }) => { return svg; });", content), &result, func(p *runtime.EvaluateParams) *runtime.EvaluateParams {
+			return p.WithAwaitPromise(true)
+		}),
 	)
 	return result, err
 }
@@ -65,7 +68,7 @@ func (r *RenderEngine) RenderAsPng(content string) ([]byte, *BoxModel, error) {
 		model           *dom.BoxModel
 	)
 	err := chromedp.Run(r.ctx,
-		chromedp.Evaluate(fmt.Sprintf("document.body.innerHTML = mermaid.render('mermaid', `%s`);", content), nil),
+		chromedp.Evaluate(fmt.Sprintf("mermaid.render('mermaid', `%s`).then(({ svg }) => { document.body.innerHTML = svg; });", content), nil),
 		chromedp.Screenshot("#mermaid", &result_in_bytes, chromedp.ByID),
 		chromedp.Dimensions("#mermaid", &model, chromedp.ByID),
 	)
