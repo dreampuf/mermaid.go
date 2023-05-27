@@ -102,14 +102,16 @@ merge newbranch`},
 	for _, tt := range cases {
 		t.Run("", func(t *testing.T) {
 			got, err := re1.Render(tt.content)
+			t.Logf("got %s, error %s", got, err)
 			if err != nil {
-				if !strings.HasPrefix(err.Error(), tt.err_has_prefix) {
-					t.Errorf("Render() error = %v", err)
+				if strings.HasPrefix(err.Error(), tt.err_has_prefix) {
+					// expected exception
 					return
 				}
+				t.Errorf("Render() error = %v", err)
 			}
 			if !strings.HasPrefix(got, "<svg") {
-				t.Errorf("Render() got = %v", got)
+				t.Errorf("Render() got an invalid svg = %v, err = %s", got, err)
 			}
 
 			result_in_bytes, box, err := re1.RenderAsPng(tt.content)

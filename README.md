@@ -57,6 +57,8 @@ png_in_bytes, box, _ := re.RenderAsPng(content)
    `git clone https://github.com/dreampuf/mermaid.go.git`
 2. Fetch the latest version of mermaid.js  
     `curl -LO https://unpkg.com/mermaid/dist/mermaid.min.js`
+    Or if you want a specific version
+    `curl -LO https://unpkg.com/mermaid@10.2.0/dist/mermaid.min.js`
 3. Test it  
    `go test ./...`
 
