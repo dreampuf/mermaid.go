@@ -3,7 +3,7 @@ module github.com/dreampuf/mermaid.go
 go 1.19
 
 require (
-	github.com/chromedp/cdproto v0.0.0-20230605001715-1e95ea08ffe6
+	github.com/chromedp/cdproto v0.0.0-20230722233645-dbf72f61037f
 	github.com/chromedp/chromedp v0.9.1
 )
 
