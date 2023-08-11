@@ -34,22 +34,7 @@ go get -u github.com/dreampuf/mermaid.go
 
 Example: 
 
-```go
-ctx := context.Background()
-re, _ := mermaid_go.NewRenderEngine(ctx)
-defer re.Cancel()
-
-content := `graph TD;
-    A-->B;
-    A-->C;
-    B-->D;
-    C-->D;`
-
-// get the render result in SVG/XML string
-svg_content, _ := re.Render(content)
-// get the result as PNG bytes
-png_in_bytes, box, _ := re.RenderAsPng(content)
-```
+An example is available [here](example/main.go).
 
 # How to build
 
@@ -58,7 +43,7 @@ png_in_bytes, box, _ := re.RenderAsPng(content)
 2. Fetch the latest version of mermaid.js  
     `curl -LO https://unpkg.com/mermaid/dist/mermaid.min.js`
     Or if you want a specific version
-    `curl -LO https://unpkg.com/mermaid@10.2.0/dist/mermaid.min.js`
+    `curl -LO https://unpkg.com/mermaid@10.3.0/dist/mermaid.min.js`
 3. Test it  
    `go test ./...`
 
