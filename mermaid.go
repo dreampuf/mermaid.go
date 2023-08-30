@@ -63,17 +63,21 @@ func (r *RenderEngine) Render(content string) (string, error) {
 	return result, err
 }
 
-func (r *RenderEngine) RenderAsPng(content string) ([]byte, *BoxModel, error) {
+func (r *RenderEngine) RenderAsScaledPng(content string, scale float64) ([]byte, *BoxModel, error) {
 	var (
 		result_in_bytes []byte
 		model           *dom.BoxModel
 	)
 	err := chromedp.Run(r.ctx,
 		chromedp.Evaluate(fmt.Sprintf("mermaid.render('mermaid', `%s`).then(({ svg }) => { document.body.innerHTML = svg; });", content), nil),
-		chromedp.Screenshot("#mermaid", &result_in_bytes, chromedp.ByID),
+		chromedp.ScreenshotScale("#mermaid", scale, &result_in_bytes, chromedp.ByID),
 		chromedp.Dimensions("#mermaid", &model, chromedp.ByID),
 	)
 	return result_in_bytes, interface{}(model).(*BoxModel), err
+}
+
+func (r *RenderEngine) RenderAsPng(content string) ([]byte, *BoxModel, error) {
+	return r.RenderAsScaledPng(content, 1.0)
 }
 
 func (r *RenderEngine) Cancel() {
