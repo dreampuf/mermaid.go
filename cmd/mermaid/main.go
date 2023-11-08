@@ -34,8 +34,8 @@ cat <filename.mermaid> | mermaid render -o <filename.[svg|png]>
 	opt.SetUnknownMode(getoptions.Pass)
 
 	render := opt.NewCommand("render", "Render a mermaid diagram to svg or png").SetCommandFn(Render)
-	render.String("output", "", opt.Description("Output file.\nUse .svg or .png extension to determine output format."), opt.Required())
-	render.HelpSynopsisArg("[<file>]", "input file")
+	render.String("output", "", opt.Description("Output file.\nUse .svg or .png extension to determine output format."), opt.Required(), opt.ArgName("filename.[svg|png]"))
+	render.HelpSynopsisArg("[<filename.mermaid>]", "mermaid input file")
 
 	opt.HelpCommand("help", opt.Alias("?"))
 	remaining, err := opt.Parse(args[1:])
