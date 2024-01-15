@@ -1,9 +1,9 @@
 module github.com/dreampuf/mermaid.go
 
-go 1.20
+go 1.21
 
 require (
-	github.com/chromedp/cdproto v0.0.0-20231025043423-5615e204d422
+	github.com/chromedp/cdproto v0.0.0-20240102194822-c006b26f21c7
 	github.com/chromedp/chromedp v0.9.3
 )
 
