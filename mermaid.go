@@ -37,6 +37,7 @@ func NewRenderEngine(ctx context.Context, statements ...string) (*RenderEngine, 
 	actions := []chromedp.Action{
 		chromedp.Navigate(DEFAULT_PAGE),
 		chromedp.Evaluate(SOURCE_MERMAID, &lib_ready),
+		chromedp.Evaluate("mermaid.initialize({startOnLoad:true})", &lib_ready),
 	}
 	for _, stmt := range statements {
 		actions = append(actions, chromedp.Evaluate(stmt, nil))
