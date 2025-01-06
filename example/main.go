@@ -26,10 +26,18 @@ func main() {
 
 	scaled_png_in_bytes, _, _ := re.RenderAsScaledPng(content, 2.0)
 
-	os.WriteFile("example.svg", []byte(svg_content), 0644)
+	err := os.WriteFile("example.svg", []byte(svg_content), 0644)
+	if err != nil {
+		os.Exit(1)
+	}
 
-	os.WriteFile("example.png", png_in_bytes, 0644)
+	err = os.WriteFile("example.png", png_in_bytes, 0644)
+	if err != nil {
+		os.Exit(1)
+	}
 
-	os.WriteFile("example_scaled.png", scaled_png_in_bytes, 0644)
-
+	err = os.WriteFile("example_scaled.png", scaled_png_in_bytes, 0644)
+	if err != nil {
+		os.Exit(1)
+	}
 }
