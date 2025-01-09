@@ -32,7 +32,7 @@ jobs:
 
   ci-unit-tests:
     name: ci-unit-tests
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
     steps:
     - name: Check out code into the Go module directory
       uses: actions/checkout@v4
@@ -48,7 +48,7 @@ jobs:
 
   ci-build-example:
     name: ci-build-example
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
     steps:
     - name: Check out code into the Go module directory
       uses: actions/checkout@v4
