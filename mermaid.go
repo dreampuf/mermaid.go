@@ -12,15 +12,15 @@ import (
 )
 
 //go:embed mermaid.min.js
-var SOURCE_MERMAID string
+var SourceMermaid string
 
-var DEFAULT_PAGE = `data:text/html,<!DOCTYPE html>
+var DefaultPage = `data:text/html,<!DOCTYPE html>
 <html lang="en">
     <head><meta charset="utf-8"></head>
     <body></body>
 </html>`
 
-var ERR_MERMAID_NOT_READY = errors.New("mermaid.js initial failed")
+var ErrMermaidNotReady = errors.New("mermaid.js initial failed")
 
 type BoxModel = dom.BoxModel
 
@@ -35,8 +35,8 @@ func NewRenderEngine(ctx context.Context, statements ...string) (*RenderEngine, 
 		lib_ready *runtime.RemoteObject
 	)
 	actions := []chromedp.Action{
-		chromedp.Navigate(DEFAULT_PAGE),
-		chromedp.Evaluate(SOURCE_MERMAID, &lib_ready),
+		chromedp.Navigate(DefaultPage),
+		chromedp.Evaluate(SourceMermaid, &lib_ready),
 		chromedp.Evaluate("mermaid.initialize({startOnLoad:true})", &lib_ready),
 	}
 	for _, stmt := range statements {
@@ -44,7 +44,7 @@ func NewRenderEngine(ctx context.Context, statements ...string) (*RenderEngine, 
 	}
 	err := chromedp.Run(ctx, actions...)
 	if err == nil && lib_ready.ObjectID != "" {
-		err = ERR_MERMAID_NOT_READY
+		err = ErrMermaidNotReady
 	}
 	return &RenderEngine{
 		ctx:    ctx,
