@@ -28,7 +28,7 @@ jobs:
       id: go
 
     - name: golangci-lint
-      uses: golangci/golangci-lint-action@v7
+      uses: golangci/golangci-lint-action@v8
 
   ci-unit-tests:
     name: ci-unit-tests
