@@ -20,7 +20,7 @@ func main() {
     C-->D;`
 
 	// get the render result in SVG/XML string
-	svg_content, _ := re.Render(content)
+	svg_content, _, _, _ := re.Render(content)
 	// get the result as PNG bytes
 	png_in_bytes, _, _ := re.RenderAsPng(content)
 

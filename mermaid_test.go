@@ -101,7 +101,7 @@ merge newbranch`},
 	defer re1.Cancel()
 	for _, tt := range cases {
 		t.Run("", func(t *testing.T) {
-			got, err := re1.Render(tt.content)
+			got, _, _, err := re1.Render(tt.content)
 			t.Logf("got %s, error %s", got, err)
 			if err != nil {
 				if strings.HasPrefix(err.Error(), tt.err_has_prefix) {
@@ -143,7 +143,7 @@ func BenchmarkRenderEngine_Render(b *testing.B) {
 	ctx1 := context.Background()
 	re1, _ := NewRenderEngine(ctx1)
 	for i := 0; i < b.N; i++ {
-		_, _ = re1.Render(case1)
+		_, _, _, _ = re1.Render(case1)
 	}
 	re1.Cancel()
 }
