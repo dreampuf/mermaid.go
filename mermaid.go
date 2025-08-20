@@ -5,6 +5,7 @@ import (
 	_ "embed"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/chromedp/cdproto/dom"
 	"github.com/chromedp/cdproto/runtime"
@@ -30,10 +31,19 @@ type RenderEngine struct {
 }
 
 func NewRenderEngine(ctx context.Context, statements ...string) (*RenderEngine, error) {
-	ctx, cancel := chromedp.NewContext(ctx)
 	var (
 		lib_ready *runtime.RemoteObject
 	)
+
+	args := chromedp.DefaultExecAllocatorOptions[:]
+
+	deadline, ok := ctx.Deadline()
+	if ok {
+		args = append(args, chromedp.WSURLReadTimeout(time.Until(deadline)))
+	}
+	actx, _ := chromedp.NewExecAllocator(ctx,
+		args...)
+	ctx, cancel := chromedp.NewContext(actx)
 	actions := []chromedp.Action{
 		chromedp.Navigate(DefaultPage),
 		chromedp.Evaluate(SourceMermaid, &lib_ready),

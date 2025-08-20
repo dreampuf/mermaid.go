@@ -5,7 +5,10 @@ import (
 	"net/http"
 	"strings"
 	"testing"
+	"time"
 )
+
+var renderTimeout = 30 * time.Second
 
 func TestRenderEngine_Render(t *testing.T) {
 	cases := []struct {
@@ -92,7 +95,8 @@ merge newbranch`},
     A-->;`, err_has_prefix: `exception "Uncaught`},
 	}
 
-	ctx1 := context.Background()
+	ctx1, cancel := context.WithTimeout(context.Background(), renderTimeout)
+	defer cancel()
 	re1, err := NewRenderEngine(ctx1, `mermaid.initialize({'theme': 'base', 'themeVariables': { 'primaryColor': '#1473e6'}});`)
 	if err != nil {
 		t.Errorf("NewRenderEngine() error = %v", err)
