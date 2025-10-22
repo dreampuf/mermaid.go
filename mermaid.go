@@ -22,7 +22,10 @@ var DefaultPage = `data:text/html,<!DOCTYPE html>
     <body></body>
 </html>`
 
-var ErrMermaidNotReady = errors.New("mermaid.js initial failed")
+var (
+	ErrMermaidNotReady = errors.New("mermaid.js initial failed")
+	ErrFailedEncoding = errors.New("failed to encode")
+)
 
 type BoxModel = dom.BoxModel
 
@@ -67,9 +70,12 @@ func (r *RenderEngine) Render(content string) (string, error) {
 	var (
 		result string
 	)
-	encodedContent, _ := json.Marshal(content)
-	err := chromedp.Run(r.ctx,
-		chromedp.Evaluate(fmt.Sprintf("mermaid.render('mermaid', `%s`).then(({ svg }) => { return svg; });", encodedContent), &result, func(p *runtime.EvaluateParams) *runtime.EvaluateParams {
+	encodedContent, err := json.Marshal(content)
+	if err != nil {
+		return "", ErrFailedEncoding
+	}
+	err = chromedp.Run(r.ctx,
+		chromedp.Evaluate(fmt.Sprintf("mermaid.render('mermaid', `%s`).then(({ svg }) => { return svg; });", string(encodedContent)), &result, func(p *runtime.EvaluateParams) *runtime.EvaluateParams {
 			return p.WithAwaitPromise(true)
 		}),
 	)
@@ -81,9 +87,12 @@ func (r *RenderEngine) RenderAsScaledPng(content string, scale float64) ([]byte,
 		result_in_bytes []byte
 		model           *dom.BoxModel
 	)
-	encodedContent, _ := json.Marshal(content)
-	err := chromedp.Run(r.ctx,
-		chromedp.Evaluate(fmt.Sprintf("mermaid.render('mermaid', `%s`).then(({ svg }) => { document.body.innerHTML = svg; });", encodedContent), nil),
+	encodedContent, err := json.Marshal(content)
+	if err != nil {
+		return nil, nil, ErrFailedEncoding
+	}
+	err = chromedp.Run(r.ctx,
+		chromedp.Evaluate(fmt.Sprintf("mermaid.render('mermaid', `%s`).then(({ svg }) => { document.body.innerHTML = svg; });", string(encodedContent)), nil),
 		chromedp.ScreenshotScale("#mermaid", scale, &result_in_bytes, chromedp.ByID),
 		chromedp.Dimensions("#mermaid", &model, chromedp.ByID),
 	)
