@@ -93,6 +93,9 @@ merge newbranch`},
 		{content: `graph TD;
     A-->B['name'];
     A-->;`, err_has_prefix: `exception "Uncaught`},
+	    {content: `graph TD;
+	A-->B["` + "`Hello World`" + `"];
+	B-->C;`},
 	}
 
 	ctx1, cancel := context.WithTimeout(context.Background(), renderTimeout)
