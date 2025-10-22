@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"time"
+	"encoding/json"
 
 	"github.com/chromedp/cdproto/dom"
 	"github.com/chromedp/cdproto/runtime"
