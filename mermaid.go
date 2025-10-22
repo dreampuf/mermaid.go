@@ -66,8 +66,9 @@ func (r *RenderEngine) Render(content string) (string, error) {
 	var (
 		result string
 	)
+	encodedContent, _ := json.Marshal(content)
 	err := chromedp.Run(r.ctx,
-		chromedp.Evaluate(fmt.Sprintf("mermaid.render('mermaid', `%s`).then(({ svg }) => { return svg; });", content), &result, func(p *runtime.EvaluateParams) *runtime.EvaluateParams {
+		chromedp.Evaluate(fmt.Sprintf("mermaid.render('mermaid', `%s`).then(({ svg }) => { return svg; });", encodedContent), &result, func(p *runtime.EvaluateParams) *runtime.EvaluateParams {
 			return p.WithAwaitPromise(true)
 		}),
 	)
@@ -79,8 +80,9 @@ func (r *RenderEngine) RenderAsScaledPng(content string, scale float64) ([]byte,
 		result_in_bytes []byte
 		model           *dom.BoxModel
 	)
+	encodedContent, _ := json.Marshal(content)
 	err := chromedp.Run(r.ctx,
-		chromedp.Evaluate(fmt.Sprintf("mermaid.render('mermaid', `%s`).then(({ svg }) => { document.body.innerHTML = svg; });", content), nil),
+		chromedp.Evaluate(fmt.Sprintf("mermaid.render('mermaid', `%s`).then(({ svg }) => { document.body.innerHTML = svg; });", encodedContent), nil),
 		chromedp.ScreenshotScale("#mermaid", scale, &result_in_bytes, chromedp.ByID),
 		chromedp.Dimensions("#mermaid", &model, chromedp.ByID),
 	)
