@@ -55,22 +55,19 @@ Class01 : size()
 Class01 : int chimp
 Class01 : int gorilla
 Class08 <--> C2: Cool label`},
-		{content: `gitGraph:
-options
-{
-    "nodeSpacing": 150,
-    "nodeRadius": 10
-}
-end
-commit
-branch newbranch
-checkout newbranch
-commit
-commit
-checkout main
-commit
-commit
-merge newbranch`},
+		{content: `gitGraph
+       commit
+       commit
+       branch develop
+       commit
+       commit
+       commit
+       checkout main
+       commit
+       commit
+       merge develop
+       commit
+       commit`},
 		{content: `erDiagram
     CUSTOMER ||--o{ ORDER : places
     ORDER ||--|{ LINE-ITEM : contains
@@ -93,7 +90,7 @@ merge newbranch`},
 		{content: `graph TD;
     A-->B['name'];
     A-->;`, err_has_prefix: `exception "Uncaught`},
-	    {content: `graph TD;
+		{content: `graph TD;
 	A-->B["` + "`Hello World`" + `"];
 	B-->C;`},
 	}
@@ -111,7 +108,7 @@ merge newbranch`},
 			got, err := re1.Render(tt.content)
 			t.Logf("got %s, error %s", got, err)
 			if err != nil {
-				if strings.HasPrefix(err.Error(), tt.err_has_prefix) {
+				if tt.err_has_prefix != "" && strings.HasPrefix(err.Error(), tt.err_has_prefix) {
 					// expected exception
 					return
 				}

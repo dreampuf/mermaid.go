@@ -74,7 +74,7 @@ func (r *RenderEngine) Render(content string) (string, error) {
 	if err != nil {
 		return "", ErrFailedEncoding
 	}
-	
+
 	err = chromedp.Run(r.ctx,
 		chromedp.Evaluate(fmt.Sprintf("mermaid.render('mermaid', %s).then(({ svg }) => { return svg; });", string(encodedContent)), &result, func(p *runtime.EvaluateParams) *runtime.EvaluateParams {
 			return p.WithAwaitPromise(true)
