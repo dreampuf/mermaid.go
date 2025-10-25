@@ -3,10 +3,10 @@ package mermaid_go
 import (
 	"context"
 	_ "embed"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"time"
-	"encoding/json"
 
 	"github.com/chromedp/cdproto/dom"
 	"github.com/chromedp/cdproto/runtime"
@@ -24,7 +24,7 @@ var DefaultPage = `data:text/html,<!DOCTYPE html>
 
 var (
 	ErrMermaidNotReady = errors.New("mermaid.js initial failed")
-	ErrFailedEncoding = errors.New("failed to encode")
+	ErrFailedEncoding  = errors.New("failed to encode")
 )
 
 type BoxModel = dom.BoxModel
@@ -74,8 +74,9 @@ func (r *RenderEngine) Render(content string) (string, error) {
 	if err != nil {
 		return "", ErrFailedEncoding
 	}
+	
 	err = chromedp.Run(r.ctx,
-		chromedp.Evaluate(fmt.Sprintf("mermaid.render('mermaid', `%s`).then(({ svg }) => { return svg; });", string(encodedContent)), &result, func(p *runtime.EvaluateParams) *runtime.EvaluateParams {
+		chromedp.Evaluate(fmt.Sprintf("mermaid.render('mermaid', %s).then(({ svg }) => { return svg; });", string(encodedContent)), &result, func(p *runtime.EvaluateParams) *runtime.EvaluateParams {
 			return p.WithAwaitPromise(true)
 		}),
 	)
@@ -92,7 +93,7 @@ func (r *RenderEngine) RenderAsScaledPng(content string, scale float64) ([]byte,
 		return nil, nil, ErrFailedEncoding
 	}
 	err = chromedp.Run(r.ctx,
-		chromedp.Evaluate(fmt.Sprintf("mermaid.render('mermaid', `%s`).then(({ svg }) => { document.body.innerHTML = svg; });", string(encodedContent)), nil),
+		chromedp.Evaluate(fmt.Sprintf("mermaid.render('mermaid', %s).then(({ svg }) => { document.body.innerHTML = svg; });", string(encodedContent)), nil),
 		chromedp.ScreenshotScale("#mermaid", scale, &result_in_bytes, chromedp.ByID),
 		chromedp.Dimensions("#mermaid", &model, chromedp.ByID),
 	)
