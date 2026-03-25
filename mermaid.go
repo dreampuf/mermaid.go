@@ -36,7 +36,7 @@ type RenderEngine struct {
 
 func NewRenderEngine(ctx context.Context, statements ...string) (*RenderEngine, error) {
 	var (
-		lib_ready *runtime.RemoteObject
+		result string
 	)
 
 	args := chromedp.DefaultExecAllocatorOptions[:]
@@ -50,14 +50,15 @@ func NewRenderEngine(ctx context.Context, statements ...string) (*RenderEngine, 
 	ctx, cancel := chromedp.NewContext(actx)
 	actions := []chromedp.Action{
 		chromedp.Navigate(DefaultPage),
-		chromedp.Evaluate(SourceMermaid, &lib_ready),
-		chromedp.Evaluate("mermaid.initialize({startOnLoad:true})", &lib_ready),
+		chromedp.Evaluate(SourceMermaid, nil),
+		chromedp.Evaluate("mermaid.initialize({startOnLoad:true})", nil),
+		chromedp.Evaluate("typeof mermaid", &result),
 	}
 	for _, stmt := range statements {
 		actions = append(actions, chromedp.Evaluate(stmt, nil))
 	}
 	err := chromedp.Run(ctx, actions...)
-	if err == nil && lib_ready.ObjectID != "" {
+	if err == nil && result != "object" {
 		err = ErrMermaidNotReady
 	}
 	return &RenderEngine{
