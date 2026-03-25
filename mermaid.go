@@ -35,12 +35,12 @@ type RenderEngine struct {
 	allocatorCancel context.CancelFunc
 }
 
-func NewRenderEngine(ctx context.Context, statements ...string) (*RenderEngine, error) {
+func NewRenderEngine(ctx context.Context, statements []string, options ...chromedp.ExecAllocatorOption) (*RenderEngine, error) {
 	var (
 		result string
 	)
 
-	args := chromedp.DefaultExecAllocatorOptions[:]
+	args := append(chromedp.DefaultExecAllocatorOptions[:], options...)
 
 	deadline, ok := ctx.Deadline()
 	if ok {

@@ -10,7 +10,7 @@ import (
 func main() {
 
 	ctx := context.Background()
-	re, _ := mermaid_go.NewRenderEngine(ctx)
+	re, _ := mermaid_go.NewRenderEngine(ctx, nil)
 	defer re.Cancel()
 
 	content := `graph TD;

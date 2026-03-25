@@ -97,7 +97,7 @@ Class08 <--> C2: Cool label`},
 
 	ctx1, cancel := context.WithTimeout(context.Background(), renderTimeout)
 	defer cancel()
-	re1, err := NewRenderEngine(ctx1, `mermaid.initialize({'theme': 'base', 'themeVariables': { 'primaryColor': '#1473e6'}});`)
+	re1, err := NewRenderEngine(ctx1, []string{`mermaid.initialize({'theme': 'base', 'themeVariables': { 'primaryColor': '#1473e6'}});`})
 	if err != nil {
 		t.Errorf("NewRenderEngine() error = %v", err)
 	}
@@ -145,7 +145,7 @@ func BenchmarkRenderEngine_Render(b *testing.B) {
     B-->D;
     C-->D;`
 	ctx1 := context.Background()
-	re1, _ := NewRenderEngine(ctx1)
+	re1, _ := NewRenderEngine(ctx1, nil)
 	for i := 0; i < b.N; i++ {
 		_, _ = re1.Render(case1)
 	}
