@@ -100,7 +100,7 @@ func (r *RenderEngine) RenderAsScaledPng(content string, scale float64) ([]byte,
 		chromedp.ScreenshotScale("#mermaid", scale, &result_in_bytes, chromedp.ByID),
 		chromedp.Dimensions("#mermaid", &model, chromedp.ByID),
 	)
-	return result_in_bytes, interface{}(model).(*BoxModel), err
+	return result_in_bytes, model, err
 }
 
 func (r *RenderEngine) RenderAsPng(content string) ([]byte, *BoxModel, error) {
