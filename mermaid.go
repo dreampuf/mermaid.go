@@ -30,8 +30,9 @@ var (
 type BoxModel = dom.BoxModel
 
 type RenderEngine struct {
-	ctx    context.Context
-	cancel context.CancelFunc
+	ctx             context.Context
+	cancel          context.CancelFunc
+	allocatorCancel context.CancelFunc
 }
 
 func NewRenderEngine(ctx context.Context, statements ...string) (*RenderEngine, error) {
@@ -45,7 +46,7 @@ func NewRenderEngine(ctx context.Context, statements ...string) (*RenderEngine, 
 	if ok {
 		args = append(args, chromedp.WSURLReadTimeout(time.Until(deadline)))
 	}
-	actx, _ := chromedp.NewExecAllocator(ctx,
+	actx, allocatorCancel := chromedp.NewExecAllocator(ctx,
 		args...)
 	ctx, cancel := chromedp.NewContext(actx)
 	actions := []chromedp.Action{
@@ -62,8 +63,9 @@ func NewRenderEngine(ctx context.Context, statements ...string) (*RenderEngine, 
 		err = ErrMermaidNotReady
 	}
 	return &RenderEngine{
-		ctx:    ctx,
-		cancel: cancel,
+		ctx:             ctx,
+		cancel:          cancel,
+		allocatorCancel: allocatorCancel,
 	}, err
 }
 
@@ -107,4 +109,7 @@ func (r *RenderEngine) RenderAsPng(content string) ([]byte, *BoxModel, error) {
 
 func (r *RenderEngine) Cancel() {
 	r.cancel()
+	if r.allocatorCancel != nil {
+		r.allocatorCancel()
+	}
 }
