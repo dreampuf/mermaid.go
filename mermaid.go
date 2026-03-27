@@ -30,39 +30,42 @@ var (
 type BoxModel = dom.BoxModel
 
 type RenderEngine struct {
-	ctx    context.Context
-	cancel context.CancelFunc
+	ctx             context.Context
+	cancel          context.CancelFunc
+	allocatorCancel context.CancelFunc
 }
 
-func NewRenderEngine(ctx context.Context, statements ...string) (*RenderEngine, error) {
+func NewRenderEngine(ctx context.Context, statements []string, options ...chromedp.ExecAllocatorOption) (*RenderEngine, error) {
 	var (
-		lib_ready *runtime.RemoteObject
+		result string
 	)
 
-	args := chromedp.DefaultExecAllocatorOptions[:]
+	args := append(chromedp.DefaultExecAllocatorOptions[:], options...)
 
 	deadline, ok := ctx.Deadline()
 	if ok {
 		args = append(args, chromedp.WSURLReadTimeout(time.Until(deadline)))
 	}
-	actx, _ := chromedp.NewExecAllocator(ctx,
+	actx, allocatorCancel := chromedp.NewExecAllocator(ctx,
 		args...)
 	ctx, cancel := chromedp.NewContext(actx)
 	actions := []chromedp.Action{
 		chromedp.Navigate(DefaultPage),
-		chromedp.Evaluate(SourceMermaid, &lib_ready),
-		chromedp.Evaluate("mermaid.initialize({startOnLoad:true})", &lib_ready),
+		chromedp.Evaluate(SourceMermaid, nil),
+		chromedp.Evaluate("mermaid.initialize({startOnLoad:true})", nil),
+		chromedp.Evaluate("typeof mermaid", &result),
 	}
 	for _, stmt := range statements {
 		actions = append(actions, chromedp.Evaluate(stmt, nil))
 	}
 	err := chromedp.Run(ctx, actions...)
-	if err == nil && lib_ready.ObjectID != "" {
+	if err == nil && result != "object" {
 		err = ErrMermaidNotReady
 	}
 	return &RenderEngine{
-		ctx:    ctx,
-		cancel: cancel,
+		ctx:             ctx,
+		cancel:          cancel,
+		allocatorCancel: allocatorCancel,
 	}, err
 }
 
@@ -97,7 +100,7 @@ func (r *RenderEngine) RenderAsScaledPng(content string, scale float64) ([]byte,
 		chromedp.ScreenshotScale("#mermaid", scale, &result_in_bytes, chromedp.ByID),
 		chromedp.Dimensions("#mermaid", &model, chromedp.ByID),
 	)
-	return result_in_bytes, interface{}(model).(*BoxModel), err
+	return result_in_bytes, model, err
 }
 
 func (r *RenderEngine) RenderAsPng(content string) ([]byte, *BoxModel, error) {
@@ -106,4 +109,7 @@ func (r *RenderEngine) RenderAsPng(content string) ([]byte, *BoxModel, error) {
 
 func (r *RenderEngine) Cancel() {
 	r.cancel()
+	if r.allocatorCancel != nil {
+		r.allocatorCancel()
+	}
 }

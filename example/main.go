@@ -10,7 +10,10 @@ import (
 func main() {
 
 	ctx := context.Background()
-	re, _ := mermaid_go.NewRenderEngine(ctx)
+	re, err := mermaid_go.NewRenderEngine(ctx, nil)
+	if err != nil {
+		panic(err)
+	}
 	defer re.Cancel()
 
 	content := `graph TD;
@@ -20,24 +23,33 @@ func main() {
     C-->D;`
 
 	// get the render result in SVG/XML string
-	svg_content, _ := re.Render(content)
-	// get the result as PNG bytes
-	png_in_bytes, _, _ := re.RenderAsPng(content)
-
-	scaled_png_in_bytes, _, _ := re.RenderAsScaledPng(content, 2.0)
-
-	err := os.WriteFile("example.svg", []byte(svg_content), 0644)
+	svg_content, err := re.Render(content)
 	if err != nil {
-		os.Exit(1)
+		panic(err)
+	}
+	// get the result as PNG bytes
+	png_in_bytes, _, err := re.RenderAsPng(content)
+	if err != nil {
+		panic(err)
+	}
+
+	scaled_png_in_bytes, _, err := re.RenderAsScaledPng(content, 2.0)
+	if err != nil {
+		panic(err)
+	}
+
+	err = os.WriteFile("example.svg", []byte(svg_content), 0644)
+	if err != nil {
+		panic(err)
 	}
 
 	err = os.WriteFile("example.png", png_in_bytes, 0644)
 	if err != nil {
-		os.Exit(1)
+		panic(err)
 	}
 
 	err = os.WriteFile("example_scaled.png", scaled_png_in_bytes, 0644)
 	if err != nil {
-		os.Exit(1)
+		panic(err)
 	}
 }
