@@ -103,6 +103,74 @@ Class08 <--> C2: Cool label`},
 	}
 
 	defer re1.Cancel()
+
+	t.Run("BundleDiagram", func(t *testing.T) {
+		content := "graph TD; A-->B;"
+		got, err := re1.Render(content, WithBundle())
+		if err != nil {
+			t.Errorf("Render() error = %v", err)
+		}
+		expected := "graph TD; A--&gt;B;"
+		if !strings.Contains(got, "<desc>"+expected+"</desc>") {
+			t.Errorf("Render() expected to contain <desc>%s</desc>, but got %s", expected, got)
+		}
+	})
+
+	t.Run("InvalidSyntax", func(t *testing.T) {
+		content := "graph TD; A---;" // Invalid syntax
+		_, err := re1.Render(content)
+		if err == nil {
+			t.Error("Render() expected error for invalid syntax, but got nil")
+		}
+	})
+
+	t.Run("Scaling", func(t *testing.T) {
+		content := "graph TD; A-->B;"
+		img1, _, err := re1.RenderAsScaledPng(content, 1.0)
+		if err != nil {
+			t.Fatalf("RenderAsScaledPng(1.0) error = %v", err)
+		}
+		img2, _, err := re1.RenderAsScaledPng(content, 2.0)
+		if err != nil {
+			t.Fatalf("RenderAsScaledPng(2.0) error = %v", err)
+		}
+
+		if len(img2) <= len(img1) {
+			t.Errorf("RenderAsScaledPng() expected larger image data for 2.0 scale than 1.0, got %v bytes vs %v bytes", len(img2), len(img1))
+		}
+	})
+
+	t.Run("Cancel", func(t *testing.T) {
+		ctx := context.Background()
+		re, err := NewRenderEngine(ctx, nil)
+		if err != nil {
+			t.Fatalf("NewRenderEngine() error = %v", err)
+		}
+		re.Cancel()
+		_, err = re.Render("graph TD; A-->B;")
+		if err == nil {
+			t.Error("Render() expected error after Cancel(), but got nil")
+		}
+	})
+
+	t.Run("SequentialRenders", func(t *testing.T) {
+		contents := []string{
+			"graph TD; A-->B;",
+			"sequenceDiagram; Alice->>Bob: Hello;",
+			"pie title Rats; \"Cats\" : 45; \"Dogs\" : 55",
+		}
+		for _, content := range contents {
+			got, err := re1.Render(content)
+			if err != nil {
+				t.Errorf("Render(%s) error = %v", content, err)
+			}
+			if !strings.HasPrefix(got, "<svg") {
+				t.Errorf("Render(%s) got invalid svg", content)
+			}
+		}
+	})
+
+
 	for _, tt := range cases {
 		t.Run("", func(t *testing.T) {
 			got, err := re1.Render(tt.content)

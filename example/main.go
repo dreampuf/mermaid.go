@@ -23,7 +23,7 @@ func main() {
     C-->D;`
 
 	// get the render result in SVG/XML string
-	svg_content, err := re.Render(content)
+	svg_content, err := re.Render(content, mermaid_go.WithBundle())
 	if err != nil {
 		panic(err)
 	}
