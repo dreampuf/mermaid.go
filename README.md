@@ -14,7 +14,7 @@ sequenceDiagram
     B -->> A: 
     
     loop Render Process
-        A ->> B: Render()
+        A ->> B: Render(content, options...)
         B ->> C: mermaid.render()
         C ->> B: { svg, boxModel, exceptions }
         B ->> A: Result{ Svg, BoxModel Error }

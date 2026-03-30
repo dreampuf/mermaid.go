@@ -69,17 +69,50 @@ func NewRenderEngine(ctx context.Context, statements []string, options ...chrome
 	}, err
 }
 
-func (r *RenderEngine) Render(content string) (string, error) {
+type RenderOption func(*renderOptions)
+
+type renderOptions struct {
+	bundle bool
+}
+
+func WithBundle() RenderOption {
+	return func(o *renderOptions) {
+		o.bundle = true
+	}
+}
+
+func (r *RenderEngine) Render(content string, opts ...RenderOption) (string, error) {
 	var (
 		result string
 	)
+
+	renderOpts := &renderOptions{}
+	for _, opt := range opts {
+		opt(renderOpts)
+	}
+
 	encodedContent, err := json.Marshal(content)
 	if err != nil {
 		return "", ErrFailedEncoding
 	}
 
+	var script string
+	if renderOpts.bundle {
+		script = fmt.Sprintf(`mermaid.render('mermaid', %s).then(({ svg }) => {
+			const parser = new DOMParser();
+			const doc = parser.parseFromString(svg, 'image/svg+xml');
+			const svgElem = doc.querySelector('svg');
+			const desc = doc.createElementNS('http://www.w3.org/2000/svg', 'desc');
+			desc.textContent = %s;
+			svgElem.insertBefore(desc, svgElem.firstChild);
+			return new XMLSerializer().serializeToString(doc);
+		});`, string(encodedContent), string(encodedContent))
+	} else {
+		script = fmt.Sprintf("mermaid.render('mermaid', %s).then(({ svg }) => { return svg; });", string(encodedContent))
+	}
+
 	err = chromedp.Run(r.ctx,
-		chromedp.Evaluate(fmt.Sprintf("mermaid.render('mermaid', %s).then(({ svg }) => { return svg; });", string(encodedContent)), &result, func(p *runtime.EvaluateParams) *runtime.EvaluateParams {
+		chromedp.Evaluate(script, &result, func(p *runtime.EvaluateParams) *runtime.EvaluateParams {
 			return p.WithAwaitPromise(true)
 		}),
 	)
