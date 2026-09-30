@@ -124,6 +124,18 @@ type RenderEngine struct {
 
 var jsonMarshal = json.Marshal
 
+// serializedRender wraps a render expression so it starts only once every
+// earlier render in the page has settled. A render abandoned on a timeout keeps
+// running in the page, and clearing the body under it breaks it; mermaid then
+// reports that failure to whichever render is waiting in its queue, so the next
+// render would fail for the previous one's sake.
+func serializedRender(expr string) string {
+	return fmt.Sprintf(`window.__mermaidGoRender = (window.__mermaidGoRender || Promise.resolve()).catch(() => {}).then(() => {
+		document.body.innerHTML = '';
+		return %s;
+	});`, expr)
+}
+
 func NewRenderEngine(ctx context.Context, statements []string, options ...chromedp.ExecAllocatorOption) (*RenderEngine, error) {
 	var (
 		result string
@@ -410,7 +422,7 @@ func (r *RenderEngine) RenderContext(ctx context.Context, content string, opts .
 
 	var script string
 	if renderOpts.bundle {
-		script = fmt.Sprintf(`document.body.innerHTML = ''; mermaid.render('mermaid', %s).then(({ svg }) => {
+		script = serializedRender(fmt.Sprintf(`mermaid.render('mermaid', %s).then(({ svg }) => {
 			const parser = new DOMParser();
 			const doc = parser.parseFromString(svg, 'image/svg+xml');
 			const svgElem = doc.querySelector('svg');
@@ -418,9 +430,9 @@ func (r *RenderEngine) RenderContext(ctx context.Context, content string, opts .
 			desc.textContent = %s;
 			svgElem.insertBefore(desc, svgElem.firstChild);
 			return new XMLSerializer().serializeToString(doc);
-		});`, string(encodedContent), string(encodedContent))
+		})`, string(encodedContent), string(encodedContent)))
 	} else {
-		script = fmt.Sprintf("document.body.innerHTML = ''; mermaid.render('mermaid', %s).then(({ svg }) => { return svg; });", string(encodedContent))
+		script = serializedRender(fmt.Sprintf("mermaid.render('mermaid', %s).then(({ svg }) => svg)", string(encodedContent)))
 	}
 
 	runCtx, cancel := r.renderContext(ctx, renderOpts)
@@ -465,7 +477,7 @@ func (r *RenderEngine) RenderAsScaledPngContext(ctx context.Context, content str
 	if err != nil {
 		return nil, nil, fmt.Errorf("%w: %w", ErrFailedEncoding, err)
 	}
-	script := fmt.Sprintf("document.body.innerHTML = ''; mermaid.render('mermaid', %s).then(({ svg }) => { document.body.innerHTML = svg; });", string(encodedContent))
+	script := serializedRender(fmt.Sprintf("mermaid.render('mermaid', %s).then(({ svg }) => { document.body.innerHTML = svg; })", string(encodedContent)))
 
 	release, err := r.acquire(ctx)
 	if err != nil {
