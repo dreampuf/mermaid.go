@@ -36,6 +36,7 @@ import (
 	"errors"
 	"fmt"
 	"iter"
+	"os/exec"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -93,7 +94,9 @@ var (
 	// embeds the source in the SVG's <desc>, which a PNG has nowhere to put.
 	ErrUnsupportedOption = errors.New("unsupported render option")
 	// ErrEngineClosed reports that the engine's own context is done, because
-	// Cancel was called or the context given to NewRenderEngine was cancelled.
+	// Cancel was called, the context given to NewRenderEngine was cancelled, or
+	// the browser process died. In the last case the error also wraps the
+	// process's *exec.ExitError, so errors.As tells an OOM kill from a Cancel.
 	// Both that and a cancelled caller otherwise surface as an indistinguishable
 	// context.Canceled, yet they call for opposite responses: a cancelled caller
 	// is routine and the engine is still good, whereas a closed engine will fail
@@ -368,7 +371,28 @@ func (r *RenderEngine) acquire(ctx context.Context) (release func(), err error) 
 // renderErr classifies a failed render: the lifecycle labels every backend
 // applies, plus the crash annotation only chrome can supply.
 func (r *RenderEngine) renderErr(caller context.Context, err error) error {
-	return r.annotateCrash(classifyRenderErr(caller, r.ctx, err))
+	return r.annotateCrash(classifyRenderErr(caller, r.ctx, r.withBrowserExit(err)))
+}
+
+// withBrowserExit replaces a bare context.Canceled with the browser's exit
+// error when the browser process died on its own. chromedp attaches that error
+// only to the render in flight at the time; every later one fails before
+// reaching chromedp, in acquire, and would otherwise not say that the browser
+// was killed rather than cancelled. chromedp's error wraps context.Canceled
+// too, so nothing is lost by the replacement.
+func (r *RenderEngine) withBrowserExit(err error) error {
+	if r.ctx.Err() == nil || !errors.Is(err, context.Canceled) || errors.As(err, new(*exec.ExitError)) {
+		return err
+	}
+	// Run decorates the error of its action with the exit error, and adds
+	// nothing when the engine was closed with Cancel.
+	_, exitErr := chromedp.Run(r.ctx, func(ctx context.Context, _ *chromedp.Target) (chromedp.Void, error) {
+		return chromedp.Void{}, ctx.Err()
+	})
+	if errors.As(exitErr, new(*exec.ExitError)) {
+		return exitErr
+	}
+	return err
 }
 
 // renderContext derives the context for one render, applying whichever of the
