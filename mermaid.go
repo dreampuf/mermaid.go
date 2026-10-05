@@ -35,6 +35,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"iter"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -61,9 +62,9 @@ const DefaultRenderTimeout = 30 * time.Second
 
 // DefaultStartupTimeout bounds loading mermaid.js and running the caller's
 // statements in NewRenderEngine when the supplied context has no deadline of its
-// own. WSURLReadTimeout only covers reading the DevTools URL from chrome's
-// stderr, so without this the evaluation of the embedded 3.5MB bundle could hang
-// indefinitely. Pass a context with a deadline to choose a different bound.
+// own. Nothing in chromedp bounds that work, so without this the evaluation of
+// the embedded 3.5MB bundle could hang indefinitely. Pass a context with a
+// deadline to choose a different bound.
 const DefaultStartupTimeout = 60 * time.Second
 
 var (
@@ -80,8 +81,9 @@ var (
 	// may well succeed.
 	//
 	// Both backends use it, and each keeps its own detail reachable with
-	// errors.As: chrome raises a JavaScript exception and leaves the
-	// *runtime.ExceptionDetails for the script location and stack, while merman
+	// errors.As: chrome raises a JavaScript exception and leaves a
+	// *chromedp.ExceptionError, which embeds the *runtime.ExceptionDetails with
+	// the script location and stack, while merman
 	// exits 1 and leaves a *MermanExitError. Only chrome's detail is a genuine
 	// exception, and only merman's status is imperfectly exclusive to the
 	// diagram -- see MermanExitError.
@@ -113,8 +115,8 @@ type RenderEngine struct {
 	renderTimeout atomic.Int64
 
 	// crashMu guards the crash bookkeeping below. It is deliberately separate
-	// from sem: the chromedp event goroutine takes it while a render is in
-	// flight, and making that goroutine wait for a render would deadlock.
+	// from sem: the event goroutines take it while a render is in flight, and
+	// a crash must be recorded without waiting for that render to finish.
 	crashMu      sync.Mutex
 	crashed      bool
 	detachReason string
@@ -136,6 +138,12 @@ func serializedRender(expr string) string {
 	});`, expr)
 }
 
+// detach reasons chrome gives when the target goes away on purpose.
+const (
+	detachReasonTargetClosed   = "target_closed"
+	detachReasonCanceledByUser = "canceled_by_user"
+)
+
 func NewRenderEngine(ctx context.Context, statements []string, options ...chromedp.ExecAllocatorOption) (*RenderEngine, error) {
 	var (
 		result string
@@ -144,6 +152,8 @@ func NewRenderEngine(ctx context.Context, statements []string, options ...chrome
 	args := make([]chromedp.ExecAllocatorOption, 0, len(chromedp.DefaultExecAllocatorOptions)+len(options)+1)
 	args = append(args, chromedp.DefaultExecAllocatorOptions[:]...)
 
+	// WSURLReadTimeout only matters when the caller opts into the websocket
+	// transport (remote.WebSocket); the default pipe transport ignores it.
 	deadline, ok := ctx.Deadline()
 	if ok {
 		timeout := time.Until(deadline)
@@ -163,43 +173,47 @@ func NewRenderEngine(ctx context.Context, statements []string, options ...chrome
 		allocatorCancel: allocatorCancel,
 	}
 	engine.renderTimeout.Store(int64(DefaultRenderTimeout))
-	// chromedp enables the Inspector domain during target setup, so this picks
-	// up crashes for the lifetime of the engine. Registering before the first
-	// Run is safe: chromedp queues listeners until the target exists.
-	chromedp.ListenTarget(ctx, engine.handleTargetEvent)
 
-	actions := []chromedp.Action{
+	actions := []chromedp.Action[chromedp.Void]{
 		chromedp.Navigate(DefaultPage),
-		// Evaluate asks for results by value unless handed a
-		// **runtime.RemoteObject, so it would serialise the bundle's completion
-		// value -- some 23KB of object graph -- and ship it over the websocket
-		// only for it to be discarded here. Decline it instead. Overriding the
-		// option is enough because Evaluate applies opts after its own default,
-		// and a nil res is ignored outright.
-		chromedp.Evaluate(SourceMermaid, nil, func(p *runtime.EvaluateParams) *runtime.EvaluateParams {
-			return p.WithReturnByValue(false)
+		// Evaluate asks for results by value unless T is *runtime.RemoteObject,
+		// so it would serialise the bundle's completion value -- some 23KB of
+		// object graph -- and ship it to us only for Void to discard it here.
+		// Decline it instead. Overriding the option is enough because Evaluate
+		// applies opts after its own default.
+		chromedp.Evaluate[chromedp.Void](SourceMermaid, func(p *runtime.EvaluateParams) {
+			p.ReturnByValue = new(false)
 		}),
-		chromedp.Evaluate("mermaid.initialize({startOnLoad:false})", nil),
+		chromedp.Evaluate[chromedp.Void]("mermaid.initialize({startOnLoad:false})"),
 	}
 	for _, stmt := range statements {
-		actions = append(actions, chromedp.Evaluate(stmt, nil))
+		actions = append(actions, chromedp.Evaluate[chromedp.Void](stmt))
 	}
-	actions = append(actions, chromedp.Evaluate("typeof mermaid", &result))
 
 	// Allocate the browser against the engine context before bounding anything.
 	// chromedp starts chrome with exec.CommandContext using whichever context
 	// reaches the first Run, so running the initialisation under a derived
 	// deadline would tie chrome's lifetime to that deadline and kill it the
 	// moment this function returned.
-	err := chromedp.Run(ctx)
+	err := chromedp.Do(ctx)
 	if err == nil {
+		// chromedp enables the Inspector domain during target setup, so these
+		// pick up crashes for the lifetime of the engine. Each subscription
+		// starts when Events returns and ends with the engine context.
+		go listen(chromedp.Events(ctx, inspector.TargetCrashed), engine.handleTargetEvent)
+		go listen(chromedp.Events(ctx, inspector.Detached), engine.handleTargetEvent)
+		go listen(chromedp.Events(ctx, inspector.TargetReloadedAfterCrash), engine.handleTargetEvent)
+
 		startCtx := ctx
 		if _, ok := ctx.Deadline(); !ok {
 			var startCancel context.CancelFunc
 			startCtx, startCancel = context.WithTimeout(ctx, DefaultStartupTimeout)
 			defer startCancel()
 		}
-		err = chromedp.Run(startCtx, actions...)
+		err = chromedp.Do(startCtx, actions...)
+		if err == nil {
+			result, err = chromedp.Run(startCtx, chromedp.Evaluate[string]("typeof mermaid"))
+		}
 	}
 	if err == nil && result != "object" {
 		// The value is the whole diagnostic: "undefined" means the bundle never
@@ -216,8 +230,19 @@ func NewRenderEngine(ctx context.Context, statements []string, options ...chrome
 	return engine, nil
 }
 
-// handleTargetEvent records chrome crash notifications. It runs on chromedp's
-// event goroutine and must not block.
+// listen hands each event to handle until the subscription ends, which happens
+// when the engine context is done.
+func listen[E any](events iter.Seq2[E, error], handle func(any)) {
+	for ev, err := range events {
+		if err != nil {
+			return
+		}
+		handle(&ev)
+	}
+}
+
+// handleTargetEvent records chrome crash notifications. It runs on the engine's
+// event goroutines, one per subscribed event, and must not block.
 func (r *RenderEngine) handleTargetEvent(ev any) {
 	switch e := ev.(type) {
 	case *inspector.EventTargetCrashed:
@@ -226,9 +251,9 @@ func (r *RenderEngine) handleTargetEvent(ev any) {
 		// A normal Cancel() detaches too; only unexpected reasons such as
 		// "Render process gone." indicate a crash.
 		switch e.Reason {
-		case inspector.DetachReasonTargetClosed, inspector.DetachReasonCanceledByUser:
+		case detachReasonTargetClosed, detachReasonCanceledByUser:
 		default:
-			r.noteCrash(e.Reason.String())
+			r.noteCrash(e.Reason)
 		}
 	case *inspector.EventTargetReloadedAfterCrash:
 		r.crashMu.Lock()
@@ -258,7 +283,7 @@ func (r *RenderEngine) noteCrash(reason string) {
 	}
 }
 
-// reportCrash shields chromedp's event goroutine from a panicking handler. The
+// reportCrash shields the engine's event goroutine from a panicking handler. The
 // handler runs on a goroutine the consumer does not own and cannot wrap in a
 // recover of their own, so a panic there would take the process down. There is
 // nowhere to report the panic to, so it is swallowed deliberately.
@@ -287,8 +312,8 @@ func (r *RenderEngine) CrashError() error {
 }
 
 // SetTargetCrashedHandler installs fn to be called when chrome reports that the
-// target crashed, with the same error CrashError returns. fn runs on chromedp's
-// event goroutine, so it must return promptly and must not call back into the
+// target crashed, with the same error CrashError returns. fn runs on the
+// engine's event goroutine, so it must return promptly and must not call back into the
 // engine; hand the error to a logger or a buffered channel instead. It may be
 // called more than once for a single crash as chrome supplies more detail. Pass
 // nil to remove a previously installed handler.
@@ -375,9 +400,9 @@ func (r *RenderEngine) annotateCrash(err error) error {
 	if err == nil {
 		return nil
 	}
-	// chromedp returns *runtime.ExceptionDetails as the error itself, which is
+	// chromedp returns a *chromedp.ExceptionError as the error itself, which is
 	// discoverable only if you already know to look for it.
-	var exception *runtime.ExceptionDetails
+	var exception *chromedp.ExceptionError
 	if errors.As(err, &exception) {
 		err = fmt.Errorf("%w: %w", ErrRenderException, err)
 	}
@@ -438,11 +463,7 @@ func (r *RenderEngine) RenderContext(ctx context.Context, content string, opts .
 	runCtx, cancel := r.renderContext(ctx, renderOpts)
 	defer cancel()
 
-	err = chromedp.Run(runCtx,
-		chromedp.Evaluate(script, &result, func(p *runtime.EvaluateParams) *runtime.EvaluateParams {
-			return p.WithAwaitPromise(true)
-		}),
-	)
+	result, err = chromedp.Run(runCtx, chromedp.Evaluate[string](script, awaitPromise))
 	if err != nil {
 		return "", r.renderErr(ctx, err)
 	}
@@ -460,11 +481,6 @@ func (r *RenderEngine) RenderAsScaledPng(content string, scale float64, opts ...
 // it returns no image and no box model, so a caller cannot mistake a partial
 // screenshot for a complete one.
 func (r *RenderEngine) RenderAsScaledPngContext(ctx context.Context, content string, scale float64, opts ...RenderOption) ([]byte, *BoxModel, error) {
-	var (
-		result_in_bytes []byte
-		model           *dom.BoxModel
-	)
-
 	renderOpts := &renderOptions{}
 	for _, opt := range opts {
 		opt(renderOpts)
@@ -488,17 +504,29 @@ func (r *RenderEngine) RenderAsScaledPngContext(ctx context.Context, content str
 	runCtx, cancel := r.renderContext(ctx, renderOpts)
 	defer cancel()
 
-	err = chromedp.Run(runCtx,
-		chromedp.Evaluate(script, nil, func(p *runtime.EvaluateParams) *runtime.EvaluateParams {
-			return p.WithAwaitPromise(true)
-		}),
-		chromedp.ScreenshotScale("#mermaid", scale, &result_in_bytes, chromedp.ByID),
-		chromedp.Dimensions("#mermaid", &model, chromedp.ByID),
-	)
+	type pngResult struct {
+		png   []byte
+		model *dom.BoxModel
+	}
+	res, err := chromedp.Run(runCtx, func(ctx context.Context, t *chromedp.Target) (res pngResult, err error) {
+		if _, err = chromedp.Evaluate[chromedp.Void](script, awaitPromise)(ctx, t); err != nil {
+			return res, err
+		}
+		if res.png, err = chromedp.ScreenshotScale(chromedp.ID("mermaid"), scale)(ctx, t); err != nil {
+			return res, err
+		}
+		res.model, err = chromedp.Dimensions(chromedp.ID("mermaid"))(ctx, t)
+		return res, err
+	})
 	if err != nil {
 		return nil, nil, r.renderErr(ctx, err)
 	}
-	return result_in_bytes, model, nil
+	return res.png, res.model, nil
+}
+
+// awaitPromise makes Evaluate wait for the promise a render script returns.
+func awaitPromise(p *runtime.EvaluateParams) {
+	p.AwaitPromise = new(true)
 }
 
 // RenderAsPng renders content to a PNG. It is equivalent to

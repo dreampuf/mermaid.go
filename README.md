@@ -59,9 +59,7 @@ Initializes a new render engine by launching a headless browser and loading `mer
 - `options`: Variadic list of `chromedp` allocator options.
 
 If `ctx` has no deadline, loading the bundle and running `statements` is bounded by
-`DefaultStartupTimeout` (60s); pass a context with a deadline to choose your own. Note that
-`chromedp`'s `WSURLReadTimeout` only covers reading the DevTools URL from chrome's stderr, not this
-work. Bear in mind that `ctx` also governs the **engine's whole lifetime**, so for a long-lived
+`DefaultStartupTimeout` (60s); pass a context with a deadline to choose your own. Bear in mind that `ctx` also governs the **engine's whole lifetime**, so for a long-lived
 engine prefer `context.Background()` and let each render carry its own deadline.
 
 ### `Render(content string, opts ...RenderOption) (string, error)`
@@ -101,7 +99,7 @@ normally. Pass `d <= 0` to disable the deadline and rely on the engine context a
 Registers a callback for chrome's `Inspector.targetCrashed` notification (and for a detach with an
 unexpected reason, such as `Render process gone.`), so a crashed browser is reported rather than
 observed as a timeout. `fn` receives an error wrapping `ErrTargetCrashed`, annotated with chrome's
-detach reason when one is supplied. It runs on chromedp's event goroutine: it must return promptly
+detach reason when one is supplied. It runs on the engine's event goroutine: it must return promptly
 and must not call back into the engine — hand the error to a logger or a buffered channel. A panic
 in `fn` is recovered rather than being allowed to take the process down, but it is then discarded,
 so do not rely on it surfacing anywhere.
@@ -126,7 +124,7 @@ matching on messages — which matters mainly for deciding whether a retry is wo
 
 | Error | Meaning | Retry? |
 | --- | --- | --- |
-| `ErrRenderException` | The backend rejected the diagram source. Both backends use it, and each leaves its own detail reachable via `errors.As`: Chrome a `*runtime.ExceptionDetails` (it raises a genuine JavaScript exception, with the script location and stack), merman a `*MermanExitError`. | No — it will fail identically |
+| `ErrRenderException` | The backend rejected the diagram source. Both backends use it, and each leaves its own detail reachable via `errors.As`: Chrome a `*chromedp.ExceptionError`, which embeds the `*runtime.ExceptionDetails` (it raises a genuine JavaScript exception, with the script location and stack), merman a `*MermanExitError`. | No — it will fail identically |
 | `ErrTargetCrashed` | Chrome died. Joined to the underlying error, and reported to `SetTargetCrashedHandler`. | Yes, on a fresh engine |
 | `context.DeadlineExceeded` | The render, or the wait for a turn, outran its deadline. | Maybe |
 | `ErrUnsupportedOption` | A `RenderOption` the called method cannot honour, e.g. `WithBundle()` on a PNG. | No — fix the call |

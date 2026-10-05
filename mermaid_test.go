@@ -10,9 +10,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/chromedp/cdproto/cdp"
 	"github.com/chromedp/cdproto/inspector"
 	"github.com/chromedp/cdproto/page"
-	"github.com/chromedp/cdproto/runtime"
 	"github.com/chromedp/chromedp"
 )
 
@@ -108,8 +108,7 @@ Class08 <--> C2: Cool label`},
 	// The engine outlives the whole suite, so it must not be tied to a
 	// per-render deadline; each render is bounded by DefaultRenderTimeout.
 	re1, err := NewRenderEngine(context.Background(),
-		[]string{`mermaid.initialize({'theme': 'base', 'themeVariables': { 'primaryColor': '#1473e6'}});`},
-		chromedp.WSURLReadTimeout(renderTimeout))
+		[]string{`mermaid.initialize({'theme': 'base', 'themeVariables': { 'primaryColor': '#1473e6'}});`})
 	if err != nil {
 		t.Fatalf("NewRenderEngine() error = %v", err)
 	}
@@ -379,7 +378,7 @@ func BenchmarkRenderEngine_Render(b *testing.B) {
 	// Both errors used to be discarded, so a browser that would not start
 	// panicked on the nil engine, and a failing render was timed as if it had
 	// succeeded.
-	re1, err := NewRenderEngine(context.Background(), nil, chromedp.WSURLReadTimeout(renderTimeout))
+	re1, err := NewRenderEngine(context.Background(), nil)
 	if err != nil {
 		b.Fatalf("NewRenderEngine() error = %v", err)
 	}
@@ -393,10 +392,8 @@ func BenchmarkRenderEngine_Render(b *testing.B) {
 }
 
 func TestRenderEngine_RenderTimeout(t *testing.T) {
-	// No deadline on the engine: each render carries its own. Without a
-	// deadline chromedp's 20s default dial budget applies, which a loaded
-	// machine can exceed, so ask for a generous one explicitly.
-	re, err := NewRenderEngine(context.Background(), nil, chromedp.WSURLReadTimeout(renderTimeout))
+	// No deadline on the engine: each render carries its own.
+	re, err := NewRenderEngine(context.Background(), nil)
 	if err != nil {
 		t.Fatalf("NewRenderEngine() error = %v", err)
 	}
@@ -459,7 +456,10 @@ func TestRenderEngine_TargetCrashed(t *testing.T) {
 		t.Errorf("CrashError() on a healthy engine = %v, want nil", err)
 	}
 
-	for _, reason := range []inspector.DetachReason{inspector.DetachReasonTargetClosed, inspector.DetachReasonCanceledByUser} {
+	// Chrome's reason when the renderer dies under the target.
+	const renderProcessGone = "Render process gone."
+
+	for _, reason := range []string{detachReasonTargetClosed, detachReasonCanceledByUser} {
 		re.handleTargetEvent(&inspector.EventDetached{Reason: reason})
 		if err := re.CrashError(); err != nil {
 			t.Errorf("CrashError() after a %q detach = %v, want nil", reason, err)
@@ -482,18 +482,18 @@ func TestRenderEngine_TargetCrashed(t *testing.T) {
 	}
 
 	// The detach that follows a crash carries the reason chrome gives.
-	re.handleTargetEvent(&inspector.EventDetached{Reason: inspector.DetachReasonRenderProcessGone})
+	re.handleTargetEvent(&inspector.EventDetached{Reason: renderProcessGone})
 	err = re.CrashError()
 	if !errors.Is(err, ErrTargetCrashed) {
 		t.Fatalf("CrashError() after a crash detach = %v, want ErrTargetCrashed", err)
 	}
-	if !strings.Contains(err.Error(), inspector.DetachReasonRenderProcessGone.String()) {
-		t.Errorf("CrashError() = %q, want it to mention %q", err, inspector.DetachReasonRenderProcessGone)
+	if !strings.Contains(err.Error(), renderProcessGone) {
+		t.Errorf("CrashError() = %q, want it to mention %q", err, renderProcessGone)
 	}
 	if len(reported) != 2 {
 		t.Fatalf("handler called %d times, want 2", len(reported))
 	}
-	if !errors.Is(reported[1], ErrTargetCrashed) || !strings.Contains(reported[1].Error(), inspector.DetachReasonRenderProcessGone.String()) {
+	if !errors.Is(reported[1], ErrTargetCrashed) || !strings.Contains(reported[1].Error(), renderProcessGone) {
 		t.Errorf("handler got %v, want a crash error mentioning the detach reason", reported[1])
 	}
 
@@ -530,13 +530,13 @@ func TestRenderEngine_TargetCrashed(t *testing.T) {
 // to is gone), but the GitHub runner delivers no Inspector.targetCrashed for it
 // within 15s, while a desktop chrome does. TestRenderEngine_TargetCrashed
 // covers the bookkeeping deterministically; this only adds proof that
-// ListenTarget is wired to real chrome events.
+// the event subscriptions are wired to real chrome events.
 func TestRenderEngine_TargetCrashedLive(t *testing.T) {
 	if os.Getenv("MERMAID_GO_LIVE_CRASH_TEST") == "" {
 		t.Skip("set MERMAID_GO_LIVE_CRASH_TEST=1 to run the live crash test")
 	}
 
-	re, err := NewRenderEngine(context.Background(), nil, chromedp.WSURLReadTimeout(renderTimeout))
+	re, err := NewRenderEngine(context.Background(), nil)
 	if err != nil {
 		t.Fatalf("NewRenderEngine() error = %v", err)
 	}
@@ -557,7 +557,7 @@ func TestRenderEngine_TargetCrashedLive(t *testing.T) {
 	// path rather than a failure.
 	crashCtx, crashCancel := context.WithTimeout(re.ctx, 10*time.Second)
 	defer crashCancel()
-	if err := chromedp.Run(crashCtx, chromedp.ActionFunc(page.Crash().Do)); err != nil {
+	if _, err := chromedp.Call(crashCtx, page.Crash, cdp.Empty{}); err != nil {
 		t.Logf("Page.crash returned %v (expected)", err)
 	}
 
@@ -585,7 +585,7 @@ func TestRenderEngine_TargetCrashedLive(t *testing.T) {
 }
 
 func TestRenderEngine_RenderContext(t *testing.T) {
-	re, err := NewRenderEngine(context.Background(), nil, chromedp.WSURLReadTimeout(renderTimeout))
+	re, err := NewRenderEngine(context.Background(), nil)
 	if err != nil {
 		t.Fatalf("NewRenderEngine() error = %v", err)
 	}
@@ -714,7 +714,7 @@ func TestRenderEngine_renderContext(t *testing.T) {
 }
 
 func TestRenderEngine_CancelDoesNotWaitForRender(t *testing.T) {
-	re, err := NewRenderEngine(context.Background(), nil, chromedp.WSURLReadTimeout(renderTimeout))
+	re, err := NewRenderEngine(context.Background(), nil)
 	if err != nil {
 		t.Fatalf("NewRenderEngine() error = %v", err)
 	}
@@ -738,7 +738,7 @@ func TestRenderEngine_CancelDoesNotWaitForRender(t *testing.T) {
 }
 
 func TestRenderEngine_ErrorClassification(t *testing.T) {
-	re, err := NewRenderEngine(context.Background(), nil, chromedp.WSURLReadTimeout(renderTimeout))
+	re, err := NewRenderEngine(context.Background(), nil)
 	if err != nil {
 		t.Fatalf("NewRenderEngine() error = %v", err)
 	}
@@ -750,9 +750,9 @@ func TestRenderEngine_ErrorClassification(t *testing.T) {
 			t.Fatalf("Render() error = %v, want ErrRenderException", err)
 		}
 		// The chrome detail stays reachable for the script location and stack.
-		var exception *runtime.ExceptionDetails
-		if !errors.As(err, &exception) {
-			t.Errorf("Render() error = %v, want the *runtime.ExceptionDetails to remain reachable", err)
+		var exception *chromedp.ExceptionError
+		if !errors.As(err, &exception) || exception.ExceptionDetails == nil {
+			t.Errorf("Render() error = %v, want the *chromedp.ExceptionError to remain reachable", err)
 		}
 		// An invalid diagram is not a browser failure; retrying it is pointless
 		// whereas retrying a crash is not, so the two must not be conflated.
@@ -800,8 +800,7 @@ func TestRenderEngine_ErrorClassification(t *testing.T) {
 
 func TestRenderEngine_StartupDiagnostics(t *testing.T) {
 	t.Run("MermaidNotReadyNamesTheValue", func(t *testing.T) {
-		engine, err := NewRenderEngine(context.Background(), []string{"delete window.mermaid"},
-			chromedp.WSURLReadTimeout(renderTimeout))
+		engine, err := NewRenderEngine(context.Background(), []string{"delete window.mermaid"})
 		if !errors.Is(err, ErrMermaidNotReady) {
 			t.Fatalf("NewRenderEngine() error = %v, want ErrMermaidNotReady", err)
 		}
@@ -818,7 +817,7 @@ func TestRenderEngine_StartupDiagnostics(t *testing.T) {
 		// chromedp binds chrome's process to the context of the first Run, so
 		// bounding startup with a derived deadline would kill the browser as
 		// soon as NewRenderEngine returned. Renders afterwards prove it did not.
-		re, err := NewRenderEngine(context.Background(), nil, chromedp.WSURLReadTimeout(renderTimeout))
+		re, err := NewRenderEngine(context.Background(), nil)
 		if err != nil {
 			t.Fatalf("NewRenderEngine() error = %v", err)
 		}
@@ -837,7 +836,7 @@ func TestRenderEngine_StartupDiagnostics(t *testing.T) {
 }
 
 func TestRenderEngine_ErrEngineClosed(t *testing.T) {
-	re, err := NewRenderEngine(context.Background(), nil, chromedp.WSURLReadTimeout(renderTimeout))
+	re, err := NewRenderEngine(context.Background(), nil)
 	if err != nil {
 		t.Fatalf("NewRenderEngine() error = %v", err)
 	}
@@ -874,7 +873,7 @@ func TestRenderEngine_ClosedEngineOutlivesParentContext(t *testing.T) {
 	// Cancelling the context handed to NewRenderEngine kills the engine just as
 	// Cancel does, and must be reported the same way.
 	ctx, cancel := context.WithCancel(context.Background())
-	re, err := NewRenderEngine(ctx, nil, chromedp.WSURLReadTimeout(renderTimeout))
+	re, err := NewRenderEngine(ctx, nil)
 	if err != nil {
 		t.Fatalf("NewRenderEngine() error = %v", err)
 	}
@@ -887,7 +886,7 @@ func TestRenderEngine_ClosedEngineOutlivesParentContext(t *testing.T) {
 }
 
 func TestReportCrash_ContainsPanic(t *testing.T) {
-	// The handler runs on chromedp's event goroutine, where a panic would take
+	// The handler runs on the engine's event goroutine, where a panic would take
 	// the process down with no way for the consumer to recover it.
 	re := &RenderEngine{}
 	re.SetTargetCrashedHandler(func(error) { panic("handler blew up") })
