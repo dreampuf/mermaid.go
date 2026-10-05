@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net/http"
 	"os"
+	"os/exec"
 	"strings"
 	"sync"
 	"testing"
@@ -867,6 +868,58 @@ func TestRenderEngine_ErrEngineClosed(t *testing.T) {
 	if !errors.Is(err, context.Canceled) {
 		t.Errorf("Render() after Cancel() = %v, want the underlying context.Canceled preserved", err)
 	}
+	// Closing the engine on purpose is not a browser death.
+	if errors.As(err, new(*exec.ExitError)) {
+		t.Errorf("Render() after Cancel() = %v, should not carry an exit error", err)
+	}
+}
+
+func TestRenderEngine_BrowserExitIsReported(t *testing.T) {
+	re, err := NewRenderEngine(context.Background(), nil)
+	if err != nil {
+		t.Fatalf("NewRenderEngine() error = %v", err)
+	}
+	defer re.Cancel()
+
+	process := chromedp.FromContext(re.ctx).Browser.Process()
+	if process == nil {
+		t.Skip("the allocator started no process")
+	}
+	if err := process.Kill(); err != nil {
+		t.Fatalf("Kill() error = %v", err)
+	}
+	select {
+	case <-re.ctx.Done():
+	case <-time.After(10 * time.Second):
+		t.Fatal("the engine context outlived the browser")
+	}
+
+	check := func(name string, err error) {
+		t.Helper()
+		if !errors.Is(err, ErrEngineClosed) {
+			t.Errorf("%s after the browser died = %v, want ErrEngineClosed", name, err)
+		}
+		if !errors.As(err, new(*exec.ExitError)) {
+			t.Errorf("%s after the browser died = %v, want the *exec.ExitError", name, err)
+		}
+		if !errors.Is(err, context.Canceled) {
+			t.Errorf("%s after the browser died = %v, want context.Canceled preserved", name, err)
+		}
+	}
+
+	// With the slot free a render may still reach chromedp, which attaches the
+	// exit error itself.
+	_, err = re.Render("graph TD; A-->B;")
+	check("Render()", err)
+
+	// Holding the slot forces a render to fail in acquire, before chromedp; it
+	// must still say that the browser died rather than that it was cancelled.
+	re.sem <- struct{}{}
+	defer func() { <-re.sem }()
+	_, err = re.Render("graph TD; A-->B;")
+	check("Render() waiting for its turn", err)
+	_, _, err = re.RenderAsPng("graph TD; A-->B;")
+	check("RenderAsPng() waiting for its turn", err)
 }
 
 func TestRenderEngine_ClosedEngineOutlivesParentContext(t *testing.T) {

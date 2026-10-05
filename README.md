@@ -130,7 +130,7 @@ matching on messages — which matters mainly for deciding whether a retry is wo
 | `ErrUnsupportedOption` | A `RenderOption` the called method cannot honour, e.g. `WithBundle()` on a PNG. | No — fix the call |
 | `ErrFailedEncoding` | The diagram source could not be JSON-encoded. Wraps the underlying error. | No |
 | `ErrMermaidNotReady` | `mermaid.js` did not initialise. The message names what `typeof mermaid` actually was. | No |
-| `ErrEngineClosed` | The engine's context is done, because `Cancel()` was called or the context passed to `NewRenderEngine` was cancelled. Without it this is indistinguishable from a cancelled caller, yet it needs the opposite response. | No — build a new engine |
+| `ErrEngineClosed` | The engine's context is done, because `Cancel()` was called, the context passed to `NewRenderEngine` was cancelled, or the browser process died — in which case the error also wraps its `*exec.ExitError`. Without it this is indistinguishable from a cancelled caller, yet it needs the opposite response. | No — build a new engine |
 
 The merman backend reports the same `ErrRenderException`, `ErrUnsupportedOption`,
 `ErrEngineClosed` and `context.DeadlineExceeded`, plus three of its own:
