@@ -487,7 +487,7 @@ func (r *RenderEngine) RenderContext(ctx context.Context, content string, opts .
 	runCtx, cancel := r.renderContext(ctx, renderOpts)
 	defer cancel()
 
-	result, err = chromedp.Run(runCtx, chromedp.Evaluate[string](script, awaitPromise))
+	result, err = chromedp.Run(runCtx, chromedp.Evaluate[string](script, chromedp.EvalAwaitPromise))
 	if err != nil {
 		return "", r.renderErr(ctx, err)
 	}
@@ -533,7 +533,7 @@ func (r *RenderEngine) RenderAsScaledPngContext(ctx context.Context, content str
 		model *dom.BoxModel
 	}
 	res, err := chromedp.Run(runCtx, func(ctx context.Context, t *chromedp.Target) (res pngResult, err error) {
-		if _, err = chromedp.Evaluate[chromedp.Void](script, awaitPromise)(ctx, t); err != nil {
+		if _, err = chromedp.Evaluate[chromedp.Void](script, chromedp.EvalAwaitPromise)(ctx, t); err != nil {
 			return res, err
 		}
 		if res.png, err = chromedp.ScreenshotScale(chromedp.ID("mermaid"), scale)(ctx, t); err != nil {
@@ -546,11 +546,6 @@ func (r *RenderEngine) RenderAsScaledPngContext(ctx context.Context, content str
 		return nil, nil, r.renderErr(ctx, err)
 	}
 	return res.png, res.model, nil
-}
-
-// awaitPromise makes Evaluate wait for the promise a render script returns.
-func awaitPromise(p *runtime.EvaluateParams) {
-	p.AwaitPromise = new(true)
 }
 
 // RenderAsPng renders content to a PNG. It is equivalent to
