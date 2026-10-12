@@ -106,6 +106,17 @@ so do not rely on it surfacing anywhere.
 Because chrome reports the crash and its reason as separate events, `fn` may be called more than
 once per crash, each time with more detail.
 
+### `SetConsoleHandler(fn func(chromedp.ConsoleMessage))`
+Registers a callback for every message the page writes to its console: mermaid's own log, uncaught
+exceptions and unhandled promise rejections, and chrome's log entries. Use it to learn why a render
+failed or came out wrong. mermaid logs only fatal errors by default, so raise its `logLevel` with a
+statement passed to `NewRenderEngine`, such as `mermaid.initialize({logLevel: 'warn'})`, to see
+more. Messages written before `fn` is installed, including those from `NewRenderEngine`, are
+dropped. Like the crash handler, `fn` runs on the engine's event goroutine, one message at a time
+and in order: it must return promptly and must not call back into the engine, and a panic in it is
+recovered and discarded. A render abandoned on a timeout keeps running in the page, so a message
+is not reliably tied to the render in flight when it arrives. Pass `nil` to remove the handler.
+
 ### `CrashError() error`
 Returns the recorded crash error, or `nil` if the target is healthy. Renders that fail while the
 target is crashed return the underlying chromedp error joined with this one, so
@@ -160,6 +171,7 @@ import (
 	"log"
 	"os"
 
+	"github.com/chromedp/chromedp"
 	"github.com/dreampuf/mermaid.go"
 )
 
@@ -175,6 +187,11 @@ func main() {
 	// Learn why a render failed when the browser itself went away
 	re.SetTargetCrashedHandler(func(err error) {
 		log.Printf("mermaid render engine unusable: %v", err)
+	})
+
+	// See what mermaid and the page write to the console
+	re.SetConsoleHandler(func(m chromedp.ConsoleMessage) {
+		log.Printf("mermaid console: %v", m)
 	})
 
 	content := "graph TD; A-->B;"
@@ -229,7 +246,8 @@ if *noBrowser {
 }
 ```
 
-Chrome's crash reporting (`SetTargetCrashedHandler`, `CrashError`) stays off the interface, as does
+Chrome's crash and console reporting (`SetTargetCrashedHandler`, `CrashError`,
+`SetConsoleHandler`) stays off the interface, as does
 merman's `Version`/`MermaidVersion`/`Binary`/`Capabilities`; nothing corresponds on the other side.
 
 ### `NewMermanEngine(ctx context.Context, opts ...MermanOption) (*MermanEngine, error)`
