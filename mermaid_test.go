@@ -961,3 +961,74 @@ func TestReportCrash_ContainsPanic(t *testing.T) {
 		t.Errorf("CrashError() = %v, want the crash recorded despite the panic", err)
 	}
 }
+
+func TestRenderEngine_ConsoleHandler(t *testing.T) {
+	re, err := NewRenderEngine(context.Background(),
+		[]string{`mermaid.initialize({startOnLoad: false, logLevel: 'debug'})`})
+	if err != nil {
+		t.Fatalf("NewRenderEngine() error = %v", err)
+	}
+	defer re.Cancel()
+
+	messages := make(chan chromedp.ConsoleMessage, 1024)
+	collect := func(m chromedp.ConsoleMessage) {
+		select {
+		case messages <- m:
+		default:
+		}
+	}
+	// waitFor drains messages until one satisfies match.
+	waitFor := func(what string, match func(chromedp.ConsoleMessage) bool) {
+		t.Helper()
+		timeout := time.After(10 * time.Second)
+		for {
+			select {
+			case m := <-messages:
+				if match(m) {
+					return
+				}
+			case <-timeout:
+				t.Fatalf("no console message %s within 10s", what)
+			}
+		}
+	}
+	logInPage := func(expr string) {
+		t.Helper()
+		if _, err := chromedp.Run(re.ctx, chromedp.Evaluate[chromedp.Void](expr)); err != nil {
+			t.Fatalf("Evaluate(%q) error = %v", expr, err)
+		}
+	}
+
+	// A panicking handler must neither take the process down nor stop the
+	// messages that follow from reaching the next handler.
+	re.SetConsoleHandler(func(chromedp.ConsoleMessage) { panic("handler blew up") })
+	logInPage(`console.log("swallowed")`)
+	re.SetConsoleHandler(collect)
+
+	logInPage(`console.warn("mermaid-go console test")`)
+	waitFor("from console.warn", func(m chromedp.ConsoleMessage) bool {
+		return m.Type == chromedp.ConsoleWarning && m.Text == "mermaid-go console test"
+	})
+
+	// mermaid's own log reaches the handler once its logLevel allows it.
+	if _, err := re.Render("graph TD; A-->B;"); err != nil {
+		t.Fatalf("Render() error = %v", err)
+	}
+	waitFor("from mermaid's log", func(m chromedp.ConsoleMessage) bool {
+		return m.Type == chromedp.ConsoleDebug || m.Type == chromedp.ConsoleInfo
+	})
+
+	re.SetConsoleHandler(nil)
+	logInPage(`console.error("after removal")`)
+	quiet := time.After(500 * time.Millisecond)
+	for {
+		select {
+		case m := <-messages:
+			if m.Text == "after removal" {
+				t.Fatalf("handler got %v after it was removed", m)
+			}
+		case <-quiet:
+			return
+		}
+	}
+}

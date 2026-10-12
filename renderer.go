@@ -13,9 +13,9 @@ import (
 // shells out to the merman CLI, which parses and lays diagrams out natively and
 // therefore needs no browser at all.
 //
-// Backend-specific facilities stay off the interface: chrome's crash reporting
-// ([RenderEngine.CrashError], [RenderEngine.SetTargetCrashedHandler]) has no
-// merman equivalent, and merman's capability report has no chrome equivalent.
+// Backend-specific facilities stay off the interface: chrome's crash and console
+// reporting ([RenderEngine.CrashError], [RenderEngine.SetTargetCrashedHandler],
+// [RenderEngine.SetConsoleHandler]) has no merman equivalent, and merman's capability report has no chrome equivalent.
 type Renderer interface {
 	Render(content string, opts ...RenderOption) (string, error)
 	RenderContext(ctx context.Context, content string, opts ...RenderOption) (string, error)

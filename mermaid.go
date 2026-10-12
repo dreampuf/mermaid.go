@@ -125,6 +125,10 @@ type RenderEngine struct {
 	detachReason string
 	lastReported string
 	crashHandler func(error)
+
+	// consoleHandler is read for every console message, so it is atomic rather
+	// than behind crashMu.
+	consoleHandler atomic.Pointer[func(chromedp.ConsoleMessage)]
 }
 
 var jsonMarshal = json.Marshal
@@ -206,6 +210,9 @@ func NewRenderEngine(ctx context.Context, statements []string, options ...chrome
 		go listen(chromedp.Events(ctx, inspector.TargetCrashed), engine.handleTargetEvent)
 		go listen(chromedp.Events(ctx, inspector.Detached), engine.handleTargetEvent)
 		go listen(chromedp.Events(ctx, inspector.TargetReloadedAfterCrash), engine.handleTargetEvent)
+		// The subscription's queue is unbounded, so it is drained for the
+		// lifetime of the engine whether or not a handler is installed.
+		go engine.forwardConsole(chromedp.Console(ctx))
 
 		startCtx := ctx
 		if _, ok := ctx.Deadline(); !ok {
@@ -282,17 +289,30 @@ func (r *RenderEngine) noteCrash(reason string) {
 	r.crashMu.Unlock()
 
 	if report {
-		reportCrash(handler, err)
+		callHandler(handler, err)
 	}
 }
 
-// reportCrash shields the engine's event goroutine from a panicking handler. The
-// handler runs on a goroutine the consumer does not own and cannot wrap in a
+// forwardConsole hands each console message to the installed handler, if any,
+// until the subscription ends with the engine context.
+func (r *RenderEngine) forwardConsole(messages iter.Seq2[chromedp.ConsoleMessage, error]) {
+	for m, err := range messages {
+		if err != nil {
+			return
+		}
+		if handler := r.consoleHandler.Load(); handler != nil {
+			callHandler(*handler, m)
+		}
+	}
+}
+
+// callHandler shields the engine's event goroutines from a panicking handler.
+// The handler runs on a goroutine the consumer does not own and cannot wrap in a
 // recover of their own, so a panic there would take the process down. There is
 // nowhere to report the panic to, so it is swallowed deliberately.
-func reportCrash(handler func(error), err error) {
+func callHandler[T any](handler func(T), v T) {
 	defer func() { _ = recover() }()
-	handler(err)
+	handler(v)
 }
 
 func (r *RenderEngine) crashErrLocked() error {
@@ -324,6 +344,28 @@ func (r *RenderEngine) SetTargetCrashedHandler(fn func(error)) {
 	r.crashMu.Lock()
 	defer r.crashMu.Unlock()
 	r.crashHandler = fn
+}
+
+// SetConsoleHandler installs fn to be called with every message the page writes
+// to the console: mermaid's own log, uncaught exceptions and unhandled promise
+// rejections, and chrome's log entries. It helps explain a render that failed or
+// came out wrong. mermaid logs only fatal errors by default; raise its logLevel
+// with a statement passed to NewRenderEngine, such as
+// `mermaid.initialize({logLevel: 'warn'})`, to see more.
+//
+// Messages written before fn is installed, including those from NewRenderEngine
+// itself, are dropped. fn runs on the engine's event goroutine, one message at a
+// time in the order the page wrote them, so it must return promptly and must not
+// call back into the engine. Renders are serialised, but a render abandoned on a
+// timeout keeps running in the page, so a message is not reliably tied to the
+// render in flight when it arrives. Pass nil to remove a previously installed
+// handler.
+func (r *RenderEngine) SetConsoleHandler(fn func(chromedp.ConsoleMessage)) {
+	if fn == nil {
+		r.consoleHandler.Store(nil)
+		return
+	}
+	r.consoleHandler.Store(&fn)
 }
 
 // SetRenderTimeout overrides DefaultRenderTimeout for subsequent renders. A
