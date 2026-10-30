@@ -70,6 +70,15 @@ func classifyRenderErr(caller, engineCtx context.Context, err error) error {
 	return err
 }
 
+// startupContext bounds an engine's start-up by d, unless ctx carries a
+// deadline of its own or d is <= 0.
+func startupContext(ctx context.Context, d time.Duration) (context.Context, context.CancelFunc) {
+	if _, ok := ctx.Deadline(); ok || d <= 0 {
+		return ctx, func() {}
+	}
+	return context.WithTimeout(ctx, d)
+}
+
 // deriveRenderContext derives the context for one render. It is rooted at the
 // engine context, so cancelling the engine aborts renders in flight, while the
 // caller's context contributes its deadline and its cancellation but not its

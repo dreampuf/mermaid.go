@@ -687,20 +687,16 @@ func liveMermanEngine(t *testing.T, opts ...MermanOption) *MermanEngine {
 	return engine
 }
 
-func TestMermanEngine_LiveRender(t *testing.T) {
-	engine := liveMermanEngine(t)
-	t.Logf("merman %s (mermaid %q, capabilities %v) at %s",
-		engine.Version(), engine.MermaidVersion(), engine.Capabilities(), engine.Binary())
-
-	// The families the chrome backend is tested against, so the two backends are
-	// held to the same diagrams rather than to a merman-shaped subset.
-	diagrams := map[string]string{
-		"Flowchart": `graph TD;
+// liveDiagrams are the families the chrome backend is tested against, so the
+// merman backends are held to the same diagrams rather than to a merman-shaped
+// subset.
+var liveDiagrams = map[string]string{
+	"Flowchart": `graph TD;
     A-->B;
     A-->C;
     B-->D;
     C-->D;`,
-		"Sequence": `sequenceDiagram
+	"Sequence": `sequenceDiagram
     participant Alice
     participant Bob
     Alice->>John: Hello John, how are you?
@@ -709,44 +705,50 @@ func TestMermanEngine_LiveRender(t *testing.T) {
     end
     Note right of John: Rational thoughts <br/>prevail!
     John-->>Alice: Great!`,
-		"Gantt": `gantt
+	"Gantt": `gantt
 dateFormat  YYYY-MM-DD
 title Adding GANTT diagram to mermaid
 section A section
 Completed task            :done,    des1, 2014-01-06,2014-01-08
 Active task               :active,  des2, 2014-01-09, 3d`,
-		"Class": `classDiagram
+	"Class": `classDiagram
 Class01 <|-- AveryLongClass : Cool
 Class03 *-- Class04
 Class07 : equals()
 Class01 : size()`,
-		"GitGraph": `gitGraph
+	"GitGraph": `gitGraph
        commit
        branch develop
        commit
        checkout main
        merge develop`,
-		"Entity": `erDiagram
+	"Entity": `erDiagram
     CUSTOMER ||--o{ ORDER : places
     ORDER ||--|{ LINE-ITEM : contains`,
-		"Journey": `journey
+	"Journey": `journey
     title My working day
     section Go to work
       Make tea: 5: Me
       Do work: 1: Me, Cat`,
-		"State": `stateDiagram-v2
+	"State": `stateDiagram-v2
     [*] --> Still
     Still --> Moving
     Moving --> [*]`,
-		"Pie": `pie title Pets
+	"Pie": `pie title Pets
     "Dogs" : 386
     "Cats" : 85`,
-		"QuotedLabels": `graph TD;
+	"QuotedLabels": `graph TD;
     A-->B['name'];
     A-->C["pic"];`,
-		"MarkdownLabel": "graph TD;\n\tA-->B[\"`Hello World`\"];\n\tB-->C;",
-	}
-	for name, content := range diagrams {
+	"MarkdownLabel": "graph TD;\n\tA-->B[\"`Hello World`\"];\n\tB-->C;",
+}
+
+func TestMermanEngine_LiveRender(t *testing.T) {
+	engine := liveMermanEngine(t)
+	t.Logf("merman %s (mermaid %q, capabilities %v) at %s",
+		engine.Version(), engine.MermaidVersion(), engine.Capabilities(), engine.Binary())
+
+	for name, content := range liveDiagrams {
 		t.Run(name, func(t *testing.T) {
 			svg, err := engine.Render(content)
 			if err != nil {

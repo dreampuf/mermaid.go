@@ -8,11 +8,12 @@ import (
 	"errors"
 	"fmt"
 	"image/png"
+	"maps"
 	"math"
 	"os"
 	"os/exec"
 	"runtime"
-	"sort"
+	"slices"
 	"strconv"
 	"strings"
 	"sync/atomic"
@@ -37,13 +38,13 @@ var (
 	// missing, would not compile or is not a reactor this package speaks to. The
 	// engine refuses to start rather than deferring the failure to the first
 	// render.
-	ErrMermanUnavailable = errors.New("merman binary unavailable")
+	ErrMermanUnavailable = errors.New("merman unavailable")
 	// ErrMermanCapability reports that the merman binary or module was built
 	// without a feature the call needs -- most often PNG output or formulas,
 	// which are compile-time features rather than something every build has. It
 	// is separated from ErrMermanFailed because the fix is to install a
 	// different build, not to change the diagram or retry.
-	ErrMermanCapability = errors.New("merman binary lacks a required capability")
+	ErrMermanCapability = errors.New("merman lacks a required capability")
 	// ErrMermanFailed reports a merman invocation that failed for a reason other
 	// than an invalid diagram: a rejected command line, an unusable configuration
 	// file, an operational failure, or output this package could not use. The
@@ -205,12 +206,8 @@ func NewMermanEngine(ctx context.Context, opts ...MermanOption) (*MermanEngine, 
 		return nil, err
 	}
 
-	probeCtx := ctx
-	if _, ok := ctx.Deadline(); !ok && cfg.startupTimeout > 0 {
-		var cancel context.CancelFunc
-		probeCtx, cancel = context.WithTimeout(ctx, cfg.startupTimeout)
-		defer cancel()
-	}
+	probeCtx, cancel := startupContext(ctx, cfg.startupTimeout)
+	defer cancel()
 	probe, err := probeMerman(probeCtx, bin)
 	if err != nil {
 		return nil, err
@@ -405,12 +402,7 @@ func (m *MermanEngine) Capabilities() []string {
 	if m.capabilities == nil {
 		return nil
 	}
-	ids := make([]string, 0, len(m.capabilities))
-	for id := range m.capabilities {
-		ids = append(ids, id)
-	}
-	sort.Strings(ids)
-	return ids
+	return slices.Sorted(maps.Keys(m.capabilities))
 }
 
 // SetRenderTimeout overrides DefaultRenderTimeout for subsequent renders. A
@@ -436,20 +428,12 @@ func (m *MermanEngine) Render(content string, opts ...RenderOption) (string, err
 // and its deadline applies if it is sooner than the engine's render timeout.
 // Only cancellation and the deadline are taken from ctx; its values are not.
 func (m *MermanEngine) RenderContext(ctx context.Context, content string, opts ...RenderOption) (string, error) {
-	renderOpts := &renderOptions{}
-	for _, opt := range opts {
-		opt(renderOpts)
-	}
-
+	renderOpts := newRenderOptions(opts)
 	out, err := m.run(ctx, renderOpts, content, nil)
 	if err != nil {
 		return "", err
 	}
-	svg := string(out)
-	if renderOpts.bundle {
-		return bundleSource(svg, content)
-	}
-	return svg, nil
+	return mermanSVG(out, content, renderOpts)
 }
 
 // RenderAsPng renders content to a PNG. It is equivalent to RenderAsPngContext
@@ -479,18 +463,9 @@ func (m *MermanEngine) RenderAsScaledPng(content string, scale float64, opts ...
 // -- that is, the image's pixel size divided by scale -- and the quads describe
 // that box at the origin.
 func (m *MermanEngine) RenderAsScaledPngContext(ctx context.Context, content string, scale float64, opts ...RenderOption) ([]byte, *BoxModel, error) {
-	renderOpts := &renderOptions{}
-	for _, opt := range opts {
-		opt(renderOpts)
-	}
-	if renderOpts.bundle {
-		return nil, nil, fmt.Errorf("%w: WithBundle has no effect on a PNG, the source is embedded in the SVG's <desc>", ErrUnsupportedOption)
-	}
-	// NaN and +Inf both compare false to <= 0, so they need naming: they would
-	// otherwise reach merman as "NaN"/"+Inf" and come back as a rejected command
-	// line rather than the unsupported scale this documents.
-	if math.IsNaN(scale) || math.IsInf(scale, 0) || scale <= 0 {
-		return nil, nil, fmt.Errorf("%w: scale must be a positive, finite number, got %v", ErrUnsupportedOption, scale)
+	renderOpts, err := mermanPngOptions(opts, scale)
+	if err != nil {
+		return nil, nil, err
 	}
 	// Only pre-empt the render when the binary said it cannot do this.
 	if m.capabilities != nil && !m.capabilities["png"] {
@@ -505,11 +480,7 @@ func (m *MermanEngine) RenderAsScaledPngContext(ctx context.Context, content str
 	if err != nil {
 		return nil, nil, err
 	}
-	config, err := png.DecodeConfig(bytes.NewReader(out))
-	if err != nil {
-		return nil, nil, fmt.Errorf("%w: %s returned an unreadable png: %w", ErrMermanFailed, m.bin, err)
-	}
-	return out, boxModelFor(float64(config.Width)/scale, float64(config.Height)/scale), nil
+	return mermanPng(out, scale, m.bin)
 }
 
 // run executes one merman invocation, with extra taking the arguments specific
@@ -522,7 +493,7 @@ func (m *MermanEngine) run(caller context.Context, opts *renderOptions, content 
 	}
 	defer release()
 
-	runCtx, cancel := deriveRenderContext(m.ctx, caller, m.effectiveTimeout(opts))
+	runCtx, cancel := deriveRenderContext(m.ctx, caller, opts.timeoutOr(&m.renderTimeout))
 	defer cancel()
 
 	args := make([]string, 0, len(m.args)+len(extra))
@@ -550,13 +521,6 @@ func (m *MermanEngine) acquire(ctx context.Context) (release func(), err error) 
 		return nil, classifyRenderErr(ctx, m.ctx, err)
 	}
 	return release, nil
-}
-
-func (m *MermanEngine) effectiveTimeout(opts *renderOptions) time.Duration {
-	if opts.hasTimeout {
-		return opts.timeout
-	}
-	return time.Duration(m.renderTimeout.Load())
 }
 
 // MermanExitError reports how a merman invocation failed: the status it exited
@@ -624,6 +588,43 @@ func mermanDiagnostic(stderr []byte) string {
 		text = text[:maxDiagnosticBytes] + "... (truncated)"
 	}
 	return text
+}
+
+// mermanSVG finishes an SVG render under either merman backend, bundling the
+// source when the call asked for it.
+func mermanSVG(out []byte, content string, opts *renderOptions) (string, error) {
+	svg := string(out)
+	if opts.bundle {
+		return bundleSource(svg, content)
+	}
+	return svg, nil
+}
+
+// mermanPngOptions applies a PNG render's options and checks its scale, as both
+// merman backends do before rendering anything.
+func mermanPngOptions(opts []RenderOption, scale float64) (*renderOptions, error) {
+	renderOpts := newRenderOptions(opts)
+	if renderOpts.bundle {
+		return nil, fmt.Errorf("%w: WithBundle has no effect on a PNG, the source is embedded in the SVG's <desc>", ErrUnsupportedOption)
+	}
+	// NaN and +Inf both compare false to <= 0, so they need naming: they would
+	// otherwise reach merman as "NaN"/"+Inf" and come back as a rejected request
+	// rather than the unsupported scale this documents.
+	if math.IsNaN(scale) || math.IsInf(scale, 0) || scale <= 0 {
+		return nil, fmt.Errorf("%w: scale must be a positive, finite number, got %v", ErrUnsupportedOption, scale)
+	}
+	return renderOpts, nil
+}
+
+// mermanPng pairs a PNG merman rendered with its box model, derived from the
+// image at scale since merman reports no layout box. from names the renderer
+// in the error for an image that does not decode.
+func mermanPng(out []byte, scale float64, from string) ([]byte, *BoxModel, error) {
+	config, err := png.DecodeConfig(bytes.NewReader(out))
+	if err != nil {
+		return nil, nil, fmt.Errorf("%w: %s returned an unreadable png: %w", ErrMermanFailed, from, err)
+	}
+	return out, boxModelFor(float64(config.Width)/scale, float64(config.Height)/scale), nil
 }
 
 // boxModelFor describes a w x h box at the origin, the shape chrome's
