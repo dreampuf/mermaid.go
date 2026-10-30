@@ -258,6 +258,16 @@ Class08 <--> C2: Cool label`},
 		}
 	})
 
+	t.Run("NoBundleFailsBeforeLaunchingChrome", func(t *testing.T) {
+		source := SourceMermaid
+		SourceMermaid = ""
+		defer func() { SourceMermaid = source }()
+		engine, err := NewRenderEngine(context.Background(), nil)
+		if !errors.Is(err, ErrMermaidNotReady) || !strings.Contains(err.Error(), "mermaidjs") {
+			t.Errorf("NewRenderEngine() without a bundle = %v, %v, want ErrMermaidNotReady naming the mermaidjs package", engine, err)
+		}
+	})
+
 	t.Run("ErrFailedEncoding", func(t *testing.T) {
 		oldJSONMarshal := jsonMarshal
 		defer func() { jsonMarshal = oldJSONMarshal }()

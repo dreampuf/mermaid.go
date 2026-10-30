@@ -33,14 +33,16 @@ const DefaultMermanSvgID = "mermaid"
 
 var (
 	// ErrMermanUnavailable reports that the merman binary could not be found or
-	// could not describe itself. The engine refuses to start rather than
-	// deferring the failure to the first render.
+	// could not describe itself, or that the merman WebAssembly module was
+	// missing, would not compile or is not a reactor this package speaks to. The
+	// engine refuses to start rather than deferring the failure to the first
+	// render.
 	ErrMermanUnavailable = errors.New("merman binary unavailable")
-	// ErrMermanCapability reports that the merman binary was built without a
-	// feature the call needs -- most often PNG output, which is a compile-time
-	// feature of the CLI rather than something every build has. It is separated
-	// from ErrMermanFailed because the fix is to install a different binary, not
-	// to change the diagram or retry.
+	// ErrMermanCapability reports that the merman binary or module was built
+	// without a feature the call needs -- most often PNG output or formulas,
+	// which are compile-time features rather than something every build has. It
+	// is separated from ErrMermanFailed because the fix is to install a
+	// different build, not to change the diagram or retry.
 	ErrMermanCapability = errors.New("merman binary lacks a required capability")
 	// ErrMermanFailed reports a merman invocation that failed for a reason other
 	// than an invalid diagram: a rejected command line, an unusable configuration
@@ -283,7 +285,7 @@ type mermanProbe struct {
 
 // probeMerman identifies the binary. It prefers `capabilities --json`, which is
 // authoritative about the compiled feature set, and falls back to --version for
-// releases that predate that command -- 0.7.0, the current stable, among them.
+// releases that predate that command -- 0.7.0 among them.
 // Those releases accept every argument this package builds and render exactly
 // the same, so all the fallback gives up is the catalogue, and the engine then
 // declines to guess rather than refusing to start.

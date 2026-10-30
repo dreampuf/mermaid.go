@@ -51,16 +51,13 @@ jobs:
     - name: Allow Chrome's sandbox (AppArmor restricts unprivileged userns on newer images)
       run: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0 || true
 
-    # The merman backend renders through this binary. Without it the tests that
-    # exercise a real merman skip, and only the fake-binary tests run.
-    #
-    # Pinned to the 0.8 prerelease rather than 0.7.0, the current stable: 0.8 is
-    # the generation that answers `capabilities --json`, so the engine's probe is
-    # exercised on its real path here. The fallback 0.7.0 takes is covered by the
-    # scripted binary in the tests.
+    # The merman CLI backend renders through this binary. Without it the tests
+    # that exercise a real merman skip, and only the fake-binary tests run. The
+    # fallback releases before 0.8 take, having no `capabilities` command, is
+    # covered by the scripted binary in the tests.
     - name: Install merman-cli
       env:
-        MERMAN_VERSION: v0.8.0-alpha.6
+        MERMAN_VERSION: v0.9.3
         MERMAN_TARGET: x86_64-unknown-linux-gnu
       run: |
         set -euo pipefail
@@ -75,6 +72,27 @@ jobs:
         mkdir -p "$HOME/.local/bin"
         install -m755 "merman-cli-${MERMAN_TARGET}/merman-cli" "$HOME/.local/bin/merman-cli"
         echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+        rm -rf "$workdir"
+
+    # The WebAssembly tests run the module mermanwasm embeds. The SDK is only
+    # fetched for a font, so the caller-font case runs too.
+    - name: Fetch a font from the merman WASI SDK
+      env:
+        MERMAN_VERSION: v0.9.3
+        MERMAN_SDK: merman-sdk-wasi-standard-wasm32-wasip1
+      run: |
+        set -euo pipefail
+        workdir="$(mktemp -d)"
+        cd "$workdir"
+        tarball="${MERMAN_SDK}.tar.xz"
+        base="https://github.com/Latias94/merman/releases/download/${MERMAN_VERSION}"
+        curl -fsSLO "${base}/${tarball}"
+        curl -fsSLO "${base}/${tarball}.sha256"
+        sha256sum -c "${tarball}.sha256"
+        fonts="$HOME/.local/share/merman"
+        mkdir -p "$fonts"
+        tar -xJf "${tarball}" -C "$fonts" --strip-components=2 "${MERMAN_SDK}/fonts/Cousine-Regular.ttf"
+        echo "MERMAN_WASI_FONT=$fonts/Cousine-Regular.ttf" >> "$GITHUB_ENV"
         rm -rf "$workdir"
 
     - name: Run unit tests
