@@ -4,12 +4,9 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"encoding/xml"
 	"errors"
 	"fmt"
-	"image/png"
 	"maps"
-	"math"
 	"os"
 	"os/exec"
 	"runtime"
@@ -19,7 +16,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/chromedp/cdproto/dom"
+	"github.com/dreampuf/mermaid.go/internal/render"
 )
 
 // MermanBinaries are the names NewMermanEngine looks for on PATH, in order,
@@ -38,19 +35,19 @@ var (
 	// missing, would not compile or is not a reactor this package speaks to. The
 	// engine refuses to start rather than deferring the failure to the first
 	// render.
-	ErrMermanUnavailable = errors.New("merman unavailable")
+	ErrMermanUnavailable = render.ErrMermanUnavailable
 	// ErrMermanCapability reports that the merman binary or module was built
 	// without a feature the call needs -- most often PNG output or formulas,
 	// which are compile-time features rather than something every build has. It
 	// is separated from ErrMermanFailed because the fix is to install a
 	// different build, not to change the diagram or retry.
-	ErrMermanCapability = errors.New("merman lacks a required capability")
+	ErrMermanCapability = render.ErrMermanCapability
 	// ErrMermanFailed reports a merman invocation that failed for a reason other
 	// than an invalid diagram: a rejected command line, an unusable configuration
 	// file, an operational failure, or output this package could not use. The
 	// binary's stderr is included, and a *MermanExitError carrying the exit status
 	// is reachable with errors.As when a process is what failed.
-	ErrMermanFailed = errors.New("merman render failed")
+	ErrMermanFailed = render.ErrMermanFailed
 )
 
 // MermanEngine renders diagrams by running the merman CLI, which parses, lays
@@ -206,7 +203,7 @@ func NewMermanEngine(ctx context.Context, opts ...MermanOption) (*MermanEngine, 
 		return nil, err
 	}
 
-	probeCtx, cancel := startupContext(ctx, cfg.startupTimeout)
+	probeCtx, cancel := render.StartupContext(ctx, cfg.startupTimeout)
 	defer cancel()
 	probe, err := probeMerman(probeCtx, bin)
 	if err != nil {
@@ -428,12 +425,12 @@ func (m *MermanEngine) Render(content string, opts ...RenderOption) (string, err
 // and its deadline applies if it is sooner than the engine's render timeout.
 // Only cancellation and the deadline are taken from ctx; its values are not.
 func (m *MermanEngine) RenderContext(ctx context.Context, content string, opts ...RenderOption) (string, error) {
-	renderOpts := newRenderOptions(opts)
+	renderOpts := render.NewOptions(opts)
 	out, err := m.run(ctx, renderOpts, content, nil)
 	if err != nil {
 		return "", err
 	}
-	return mermanSVG(out, content, renderOpts)
+	return render.MermanSVG(out, content, renderOpts)
 }
 
 // RenderAsPng renders content to a PNG. It is equivalent to RenderAsPngContext
@@ -463,7 +460,7 @@ func (m *MermanEngine) RenderAsScaledPng(content string, scale float64, opts ...
 // -- that is, the image's pixel size divided by scale -- and the quads describe
 // that box at the origin.
 func (m *MermanEngine) RenderAsScaledPngContext(ctx context.Context, content string, scale float64, opts ...RenderOption) ([]byte, *BoxModel, error) {
-	renderOpts, err := mermanPngOptions(opts, scale)
+	renderOpts, err := render.MermanPngOptions(opts, scale)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -480,20 +477,20 @@ func (m *MermanEngine) RenderAsScaledPngContext(ctx context.Context, content str
 	if err != nil {
 		return nil, nil, err
 	}
-	return mermanPng(out, scale, m.bin)
+	return render.MermanPng(out, scale, m.bin)
 }
 
 // run executes one merman invocation, with extra taking the arguments specific
 // to this render. It returns stdout, which carries the rendered payload and
 // nothing else -- merman keeps diagnostics on stderr.
-func (m *MermanEngine) run(caller context.Context, opts *renderOptions, content string, extra []string) ([]byte, error) {
-	release, err := m.acquire(caller)
+func (m *MermanEngine) run(caller context.Context, opts *render.Options, content string, extra []string) ([]byte, error) {
+	release, err := render.AcquireSlot(caller, m.ctx, m.sem)
 	if err != nil {
 		return nil, err
 	}
 	defer release()
 
-	runCtx, cancel := deriveRenderContext(m.ctx, caller, opts.timeoutOr(&m.renderTimeout))
+	runCtx, cancel := render.DeriveContext(m.ctx, caller, opts.TimeoutOr(&m.renderTimeout))
 	defer cancel()
 
 	args := make([]string, 0, len(m.args)+len(extra))
@@ -513,14 +510,6 @@ func (m *MermanEngine) run(caller context.Context, opts *renderOptions, content 
 		return nil, m.runErr(caller, runCtx, err, stderr.Bytes())
 	}
 	return stdout.Bytes(), nil
-}
-
-func (m *MermanEngine) acquire(ctx context.Context) (release func(), err error) {
-	release, err = waitForSlot(ctx, m.ctx, m.sem)
-	if err != nil {
-		return nil, classifyRenderErr(ctx, m.ctx, err)
-	}
-	return release, nil
 }
 
 // MermanExitError reports how a merman invocation failed: the status it exited
@@ -556,7 +545,7 @@ func (e *MermanExitError) Error() string {
 // raw status reachable for callers that pass their own arguments.
 func (m *MermanEngine) runErr(caller, runCtx context.Context, err error, stderr []byte) error {
 	if ctxErr := runCtx.Err(); ctxErr != nil {
-		return classifyRenderErr(caller, m.ctx, ctxErr)
+		return render.ClassifyErr(caller, m.ctx, ctxErr)
 	}
 	var exit *exec.ExitError
 	if errors.As(err, &exit) {
@@ -564,10 +553,10 @@ func (m *MermanEngine) runErr(caller, runCtx context.Context, err error, stderr 
 		if exit.ExitCode() == 1 {
 			sentinel = ErrRenderException
 		}
-		return classifyRenderErr(caller, m.ctx, fmt.Errorf("%w: %w", sentinel,
+		return render.ClassifyErr(caller, m.ctx, fmt.Errorf("%w: %w", sentinel,
 			&MermanExitError{Bin: m.bin, Code: exit.ExitCode(), Stderr: mermanDiagnostic(stderr)}))
 	}
-	return classifyRenderErr(caller, m.ctx, fmt.Errorf("%w: %s: %w", ErrMermanFailed, m.bin, err))
+	return render.ClassifyErr(caller, m.ctx, fmt.Errorf("%w: %s: %w", ErrMermanFailed, m.bin, err))
 }
 
 // mermanWaitDelay bounds how long a killed render may keep this call waiting on
@@ -588,114 +577,4 @@ func mermanDiagnostic(stderr []byte) string {
 		text = text[:maxDiagnosticBytes] + "... (truncated)"
 	}
 	return text
-}
-
-// mermanSVG finishes an SVG render under either merman backend, bundling the
-// source when the call asked for it.
-func mermanSVG(out []byte, content string, opts *renderOptions) (string, error) {
-	svg := string(out)
-	if opts.bundle {
-		return bundleSource(svg, content)
-	}
-	return svg, nil
-}
-
-// mermanPngOptions applies a PNG render's options and checks its scale, as both
-// merman backends do before rendering anything.
-func mermanPngOptions(opts []RenderOption, scale float64) (*renderOptions, error) {
-	renderOpts := newRenderOptions(opts)
-	if renderOpts.bundle {
-		return nil, fmt.Errorf("%w: WithBundle has no effect on a PNG, the source is embedded in the SVG's <desc>", ErrUnsupportedOption)
-	}
-	// NaN and +Inf both compare false to <= 0, so they need naming: they would
-	// otherwise reach merman as "NaN"/"+Inf" and come back as a rejected request
-	// rather than the unsupported scale this documents.
-	if math.IsNaN(scale) || math.IsInf(scale, 0) || scale <= 0 {
-		return nil, fmt.Errorf("%w: scale must be a positive, finite number, got %v", ErrUnsupportedOption, scale)
-	}
-	return renderOpts, nil
-}
-
-// mermanPng pairs a PNG merman rendered with its box model, derived from the
-// image at scale since merman reports no layout box. from names the renderer
-// in the error for an image that does not decode.
-func mermanPng(out []byte, scale float64, from string) ([]byte, *BoxModel, error) {
-	config, err := png.DecodeConfig(bytes.NewReader(out))
-	if err != nil {
-		return nil, nil, fmt.Errorf("%w: %s returned an unreadable png: %w", ErrMermanFailed, from, err)
-	}
-	return out, boxModelFor(float64(config.Width)/scale, float64(config.Height)/scale), nil
-}
-
-// boxModelFor describes a w x h box at the origin, the shape chrome's
-// DOM.getBoxModel returns for a diagram with no offset or spacing around it.
-func boxModelFor(w, h float64) *BoxModel {
-	quad := dom.Quad{0, 0, w, 0, w, h, 0, h}
-	return &dom.BoxModel{
-		Content: quad,
-		Padding: quad,
-		Border:  quad,
-		Margin:  quad,
-		Width:   int64(math.Round(w)),
-		Height:  int64(math.Round(h)),
-	}
-}
-
-// bundleSource embeds the diagram source in the SVG's <desc>, as WithBundle does
-// under the chrome backend by way of the DOM. There is no DOM here, so the
-// element is spliced in after the root start tag, which is enough: <desc> is
-// valid as the first child of <svg> and the source is XML-escaped on the way in.
-func bundleSource(svg, content string) (string, error) {
-	open := strings.Index(svg, "<svg")
-	if open < 0 {
-		return "", fmt.Errorf("%w: rendered output has no <svg> element to bundle the source into", ErrMermanFailed)
-	}
-	end, selfClosing := endOfStartTag(svg[open:])
-	if end < 0 {
-		return "", fmt.Errorf("%w: rendered output has an unterminated <svg> start tag", ErrMermanFailed)
-	}
-	end += open
-
-	var desc bytes.Buffer
-	desc.WriteString("<desc>")
-	if err := xml.EscapeText(&desc, []byte(content)); err != nil {
-		return "", fmt.Errorf("%w: %w", ErrFailedEncoding, err)
-	}
-	desc.WriteString("</desc>")
-
-	var out strings.Builder
-	out.Grow(len(svg) + desc.Len() + len("</svg>"))
-	if selfClosing {
-		// <svg .../> has nowhere to put a child, so give it a body to hold one.
-		out.WriteString(svg[:end-1])
-		out.WriteString(">")
-		out.WriteString(desc.String())
-		out.WriteString("</svg>")
-		out.WriteString(svg[end+1:])
-		return out.String(), nil
-	}
-	out.WriteString(svg[:end+1])
-	out.WriteString(desc.String())
-	out.WriteString(svg[end+1:])
-	return out.String(), nil
-}
-
-// endOfStartTag returns the index of the '>' closing the start tag that s begins
-// with, ignoring any '>' inside a quoted attribute value, and whether the tag is
-// self-closing. It returns -1 if the tag is never closed.
-func endOfStartTag(s string) (index int, selfClosing bool) {
-	var quote byte
-	for i := 0; i < len(s); i++ {
-		switch c := s[i]; {
-		case quote != 0:
-			if c == quote {
-				quote = 0
-			}
-		case c == '"' || c == '\'':
-			quote = c
-		case c == '>':
-			return i, i > 0 && s[i-1] == '/'
-		}
-	}
-	return -1, false
 }

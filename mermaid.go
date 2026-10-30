@@ -1,11 +1,14 @@
 // Package mermaid_go renders [mermaid.js] diagrams to SVG and PNG from Go.
 //
-// Two backends render the same diagrams and satisfy the same [Renderer]
+// Three backends render the same diagrams and satisfy the same [Renderer]
 // interface. NewRenderEngine drives mermaid.js itself in a headless Chrome, and
 // is the reference: whatever mermaid.js can draw, it draws. [NewMermanEngine]
 // instead runs the [merman] CLI, a native reimplementation, which removes the
 // browser dependency entirely at the cost of being a separate implementation of
-// mermaid rather than mermaid itself.
+// mermaid rather than mermaid itself. The [mermanwasm] package runs merman's
+// WebAssembly build in process, needing neither a browser nor a binary; it is a
+// separate package so that only programs which use it link its runtime and
+// module.
 //
 // The chrome backend drives Chrome through [chromedp]. NewRenderEngine launches the
 // browser once and loads the embedded mermaid.js bundle into a page; each render
@@ -27,10 +30,12 @@
 // [mermaid.js]: https://github.com/mermaid-js/mermaid
 // [chromedp]: https://github.com/chromedp/chromedp
 // [merman]: https://github.com/Latias94/merman
+// [mermanwasm]: https://pkg.go.dev/github.com/dreampuf/mermaid.go/mermanwasm
 package mermaid_go
 
 import (
 	"context"
+	_ "embed"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -44,16 +49,15 @@ import (
 	"github.com/chromedp/cdproto/inspector"
 	"github.com/chromedp/cdproto/runtime"
 	"github.com/chromedp/chromedp"
+
+	"github.com/dreampuf/mermaid.go/internal/render"
 )
 
-// SourceMermaid is the mermaid.js bundle NewRenderEngine loads into the page.
-// This package embeds none, so that a program which only renders through merman
-// does not carry it: import the mermaidjs subpackage, which sets it to the
-// bundle it embeds,
+// SourceMermaid is the mermaid.js bundle NewRenderEngine loads into the page,
+// the release embedded in this package unless the program assigns another. The
+// linker drops it from programs that never call NewRenderEngine.
 //
-//	import _ "github.com/dreampuf/mermaid.go/mermaidjs"
-//
-// or assign a bundle of your own before calling NewRenderEngine.
+//go:embed mermaid.min.js
 var SourceMermaid string
 
 var DefaultPage = `data:text/html,<!DOCTYPE html>
@@ -76,7 +80,7 @@ const DefaultStartupTimeout = 60 * time.Second
 
 var (
 	ErrMermaidNotReady = errors.New("mermaid.js initial failed")
-	ErrFailedEncoding  = errors.New("failed to encode")
+	ErrFailedEncoding  = render.ErrFailedEncoding
 	// ErrTargetCrashed reports that chrome sent Inspector.targetCrashed (or
 	// detached for a reason other than a normal shutdown). Renders issued
 	// against a crashed target fail with this error joined to the underlying
@@ -94,11 +98,11 @@ var (
 	// exits 1 and leaves a *MermanExitError. Only chrome's detail is a genuine
 	// exception, and only merman's status is imperfectly exclusive to the
 	// diagram -- see MermanExitError.
-	ErrRenderException = errors.New("render rejected the diagram source")
+	ErrRenderException = render.ErrRenderException
 	// ErrUnsupportedOption reports a RenderOption that the called method cannot
 	// honour, rather than ignoring it. WithBundle is the only such option: it
 	// embeds the source in the SVG's <desc>, which a PNG has nowhere to put.
-	ErrUnsupportedOption = errors.New("unsupported render option")
+	ErrUnsupportedOption = render.ErrUnsupportedOption
 	// ErrEngineClosed reports that the engine's own context is done, because
 	// Cancel was called, the context given to NewRenderEngine was cancelled, or
 	// the browser process died. In the last case the error also wraps the
@@ -107,7 +111,7 @@ var (
 	// context.Canceled, yet they call for opposite responses: a cancelled caller
 	// is routine and the engine is still good, whereas a closed engine will fail
 	// every subsequent render until a new one is built.
-	ErrEngineClosed = errors.New("render engine is closed")
+	ErrEngineClosed = render.ErrEngineClosed
 )
 
 type BoxModel = dom.BoxModel
@@ -164,7 +168,7 @@ func NewRenderEngine(ctx context.Context, statements []string, options ...chrome
 
 	// Fail before launching a browser that could never render anything.
 	if SourceMermaid == "" {
-		return nil, fmt.Errorf(`%w: no mermaid.js bundle; import _ "github.com/dreampuf/mermaid.go/mermaidjs" or set SourceMermaid`, ErrMermaidNotReady)
+		return nil, fmt.Errorf("%w: SourceMermaid is empty", ErrMermaidNotReady)
 	}
 
 	args := make([]chromedp.ExecAllocatorOption, 0, len(chromedp.DefaultExecAllocatorOptions)+len(options)+1)
@@ -225,7 +229,7 @@ func NewRenderEngine(ctx context.Context, statements []string, options ...chrome
 		// lifetime of the engine whether or not a handler is installed.
 		go engine.forwardConsole(chromedp.Console(ctx))
 
-		startCtx, startCancel := startupContext(ctx, DefaultStartupTimeout)
+		startCtx, startCancel := render.StartupContext(ctx, DefaultStartupTimeout)
 		defer startCancel()
 		err = chromedp.Do(startCtx, actions...)
 		if err == nil {
@@ -382,43 +386,20 @@ func (r *RenderEngine) SetRenderTimeout(d time.Duration) {
 	r.renderTimeout.Store(int64(d))
 }
 
-type RenderOption func(*renderOptions)
-
-type renderOptions struct {
-	bundle     bool
-	timeout    time.Duration
-	hasTimeout bool
-}
-
-func newRenderOptions(opts []RenderOption) *renderOptions {
-	o := &renderOptions{}
-	for _, opt := range opts {
-		opt(o)
-	}
-	return o
-}
-
-// timeoutOr is the per-render deadline this call asked for, defaulting to the
-// engine's. A value <= 0 means no deadline of our own.
-func (o *renderOptions) timeoutOr(engine *atomic.Int64) time.Duration {
-	if o.hasTimeout {
-		return o.timeout
-	}
-	return time.Duration(engine.Load())
-}
+type RenderOption func(*render.Options)
 
 func WithBundle() RenderOption {
-	return func(o *renderOptions) {
-		o.bundle = true
+	return func(o *render.Options) {
+		o.Bundle = true
 	}
 }
 
 // WithTimeout overrides the engine's render timeout for a single call. A value
 // <= 0 disables the deadline for that call.
 func WithTimeout(d time.Duration) RenderOption {
-	return func(o *renderOptions) {
-		o.timeout = d
-		o.hasTimeout = true
+	return func(o *render.Options) {
+		o.Timeout = d
+		o.HasTimeout = true
 	}
 }
 
@@ -427,7 +408,7 @@ func WithTimeout(d time.Duration) RenderOption {
 // unbounded queue of other renders with no way out, because the per-render
 // deadline only starts once a render actually begins.
 func (r *RenderEngine) acquire(ctx context.Context) (release func(), err error) {
-	release, err = waitForSlot(ctx, r.ctx, r.sem)
+	release, err = render.WaitForSlot(ctx, r.ctx, r.sem)
 	if err != nil {
 		return nil, r.renderErr(ctx, err)
 	}
@@ -437,7 +418,7 @@ func (r *RenderEngine) acquire(ctx context.Context) (release func(), err error) 
 // renderErr classifies a failed render: the lifecycle labels every backend
 // applies, plus the crash annotation only chrome can supply.
 func (r *RenderEngine) renderErr(caller context.Context, err error) error {
-	return r.annotateCrash(classifyRenderErr(caller, r.ctx, r.withBrowserExit(err)))
+	return r.annotateCrash(render.ClassifyErr(caller, r.ctx, r.withBrowserExit(err)))
 }
 
 // withBrowserExit replaces a bare context.Canceled with the browser's exit
@@ -469,8 +450,8 @@ func (r *RenderEngine) withBrowserExit(err error) error {
 // commands, so the engine stays usable after a timeout. This is not true of the
 // very first Run against a fresh engine, which is why NewRenderEngine allocates
 // the browser separately -- see the comment there.
-func (r *RenderEngine) renderContext(caller context.Context, opts *renderOptions) (context.Context, context.CancelFunc) {
-	return deriveRenderContext(r.ctx, caller, opts.timeoutOr(&r.renderTimeout))
+func (r *RenderEngine) renderContext(caller context.Context, opts *render.Options) (context.Context, context.CancelFunc) {
+	return render.DeriveContext(r.ctx, caller, opts.TimeoutOr(&r.renderTimeout))
 }
 
 // annotateCrash classifies a render failure so callers can act on it without
@@ -510,7 +491,7 @@ func (r *RenderEngine) RenderContext(ctx context.Context, content string, opts .
 		result string
 	)
 
-	renderOpts := newRenderOptions(opts)
+	renderOpts := render.NewOptions(opts)
 
 	encodedContent, err := jsonMarshal(content)
 	if err != nil {
@@ -524,7 +505,7 @@ func (r *RenderEngine) RenderContext(ctx context.Context, content string, opts .
 	defer release()
 
 	var script string
-	if renderOpts.bundle {
+	if renderOpts.Bundle {
 		script = serializedRender(fmt.Sprintf(`mermaid.render('mermaid', %s).then(({ svg }) => {
 			const parser = new DOMParser();
 			const doc = parser.parseFromString(svg, 'image/svg+xml');
@@ -559,8 +540,8 @@ func (r *RenderEngine) RenderAsScaledPng(content string, scale float64, opts ...
 // it returns no image and no box model, so a caller cannot mistake a partial
 // screenshot for a complete one.
 func (r *RenderEngine) RenderAsScaledPngContext(ctx context.Context, content string, scale float64, opts ...RenderOption) ([]byte, *BoxModel, error) {
-	renderOpts := newRenderOptions(opts)
-	if renderOpts.bundle {
+	renderOpts := render.NewOptions(opts)
+	if renderOpts.Bundle {
 		return nil, nil, fmt.Errorf("%w: WithBundle has no effect on a PNG, the source is embedded in the SVG's <desc>", ErrUnsupportedOption)
 	}
 

@@ -12,8 +12,8 @@ see [Rendering without a browser](#rendering-without-a-browser).
 
 The default backend uses `chromedp`, so you must have **Google Chrome** or **Chromium** installed on
 your system. The merman backends need neither: the CLI backend requires only the `merman-cli` binary
-on `PATH`, and the WebAssembly backend only merman's `merman_wasi.wasm` module, which this module
-ships — no binary, no cgo.
+on `PATH`, and the WebAssembly backend in the `mermanwasm` package embeds merman's module — no
+binary, no cgo.
 
 ## Installation
 
@@ -21,22 +21,13 @@ ships — no binary, no cgo.
 go get -u github.com/dreampuf/mermaid.go
 ```
 
-The root package embeds no renderer assets. Each backend that needs one has a subpackage that embeds
-it and registers it when imported, so a program links only what it renders with:
+The root package holds the chrome backend, with `mermaid.min.js` embedded, and the merman CLI
+backend. The WebAssembly backend lives in its own package, so only programs that import it link
+wazero and the 15 MB module:
 
-| Import | Embeds | Enables |
-| --- | --- | --- |
-| `_ "github.com/dreampuf/mermaid.go/mermaidjs"` | `mermaid.min.js`, ~5 MB | `NewRenderEngine` (chrome) |
-| `_ "github.com/dreampuf/mermaid.go/mermanwasm"` | merman's standard `merman_wasi.wasm`, ~15 MB | `NewMermanWasmEngine` with no module option |
-
-Import either, both, or neither. `NewMermanEngine` needs neither, since it runs the `merman-cli`
-binary. For a minimal program that only references the package, the binary is 3.6 MB with neither,
-8.9 MB with `mermaidjs`, 19 MB with `mermanwasm`, and 24 MB with both.
-
-Moving the bundle out of the root package is a breaking change for the chrome backend, since earlier
-releases embedded `mermaid.min.js` there. Without the `mermaidjs` import, `NewRenderEngine` now fails at
-once with `ErrMermaidNotReady`, and its message names the import to add. Assigning your own bundle to
-`SourceMermaid` still works, and an assignment made before the subpackage's `init` takes precedence.
+```go
+import "github.com/dreampuf/mermaid.go/mermanwasm"
+```
 
 ## Architecture
 
@@ -74,8 +65,8 @@ sequenceDiagram
 ## API Overview
 
 ### `NewRenderEngine(ctx context.Context, statements []string, options ...chromedp.ExecAllocatorOption) (*RenderEngine, error)`
-Initializes a new render engine by launching a headless browser and loading `mermaid.js` from
-`SourceMermaid`, which importing `mermaidjs` sets. 
+Initializes a new render engine by launching a headless browser and loading the embedded `mermaid.js`
+from `SourceMermaid`.
 - `statements`: Optional JavaScript statements to execute during initialization (e.g., custom mermaid configuration).
 - `options`: Variadic list of `chromedp` allocator options.
 
@@ -156,7 +147,7 @@ matching on messages — which matters mainly for deciding whether a retry is wo
 
 | Error | Meaning | Retry? |
 | --- | --- | --- |
-| `ErrRenderException` | The backend rejected the diagram source. Both backends use it, and each leaves its own detail reachable via `errors.As`: Chrome a `*chromedp.ExceptionError`, which embeds the `*runtime.ExceptionDetails` (it raises a genuine JavaScript exception, with the script location and stack), the merman CLI a `*MermanExitError`, the merman WebAssembly module a `*MermanWasmError`. | No — it will fail identically |
+| `ErrRenderException` | The backend rejected the diagram source. Both backends use it, and each leaves its own detail reachable via `errors.As`: Chrome a `*chromedp.ExceptionError`, which embeds the `*runtime.ExceptionDetails` (it raises a genuine JavaScript exception, with the script location and stack), the merman CLI a `*MermanExitError`, the merman WebAssembly module a `*mermanwasm.Error`. | No — it will fail identically |
 | `ErrTargetCrashed` | Chrome died. Joined to the underlying error, and reported to `SetTargetCrashedHandler`. | Yes, on a fresh engine |
 | `context.DeadlineExceeded` | The render, or the wait for a turn, outran its deadline. | Maybe |
 | `ErrUnsupportedOption` | A `RenderOption` the called method cannot honour, e.g. `WithBundle()` on a PNG. | No — fix the call |
@@ -183,7 +174,7 @@ fails once, honestly, instead of making every render look like a bad diagram. A 
 through `WithMermanArgs` is still merman's to reject.
 
 The WebAssembly backend has no such ambiguity: merman reports each failure as a structured payload,
-recovered with `errors.As` as a `*MermanWasmError` (`Code`, `CodeName` such as `MERMAN_PARSE_ERROR`,
+recovered with `errors.As` as a `*mermanwasm.Error` (`Code`, `CodeName` such as `MERMAN_PARSE_ERROR`,
 `Kind`, `CapabilityID`, `Message`, and the raw `Details` JSON, which carries a parse error's source
 span). Parse, render, no-diagram, UTF-8 and resource-limit failures are `ErrRenderException`; a
 missing capability is `ErrMermanCapability`; everything else is `ErrMermanFailed`.
@@ -200,7 +191,6 @@ import (
 
 	"github.com/chromedp/chromedp"
 	"github.com/dreampuf/mermaid.go"
-	_ "github.com/dreampuf/mermaid.go/mermaidjs"
 )
 
 func main() {
@@ -247,9 +237,9 @@ without a browser or a JavaScript runtime. This package can run it two ways:
 
 - `NewMermanEngine` drives its **CLI**. An engine costs one capability probe to start instead of a
   Chrome launch, and a deployment needs only the `merman-cli` binary.
-- `NewMermanWasmEngine` runs its **WebAssembly module** in process, on the pure Go
+- `mermanwasm.New` runs its **WebAssembly module** in process, on the pure Go
   [wazero](https://wazero.io) runtime. There is no external process at all and no cgo, so it works
-  wherever Go does; importing `mermanwasm` embeds the module in the program. See
+  wherever Go does, and the module is embedded in the `mermanwasm` package. See
   [In process, through WebAssembly](#in-process-through-webassembly).
 
 Bear in mind that merman is a *reimplementation* of Mermaid, not Mermaid itself: it targets a pinned
@@ -266,7 +256,7 @@ defer re.Cancel()
 svg, err := re.Render("graph TD; A-->B;", mermaid_go.WithBundle())
 ```
 
-Both engines satisfy the `Renderer` interface — `Render`, `RenderAsPng`, `RenderAsScaledPng`, their
+All three engines satisfy the `Renderer` interface — `Render`, `RenderAsPng`, `RenderAsScaledPng`, their
 `Context` variants, `SetRenderTimeout` and `Cancel` — so a program can choose a backend at startup
 and pass the result around:
 
@@ -276,7 +266,7 @@ switch *backend {
 case "merman":
     re, err = mermaid_go.NewMermanEngine(ctx)
 case "wasm":
-    re, err = mermaid_go.NewMermanWasmEngine(ctx, mermaid_go.WithMermanWasmModuleFile(*module))
+    re, err = mermanwasm.New(ctx)
 default:
     re, err = mermaid_go.NewRenderEngine(ctx, nil)
 }
@@ -348,16 +338,13 @@ with `WithMermanArgs("--font-measurement", "deterministic")`. SVG output is unaf
 
 Since 0.9.3 merman publishes its renderer as a `wasm32-wasip1` reactor in its SDK downloads, in
 three builds: **standard** (no formulas, no ELK), **math** (formulas) and **full** (formulas and ELK
-layout). The `mermanwasm` subpackage embeds the standard build, checked against the SDK's recorded
-SHA-256, and importing it is all the setup there is:
+layout). The `mermanwasm` package embeds the standard build, checked against the SDK's recorded
+SHA-256:
 
 ```go
-import (
-    mermaid_go "github.com/dreampuf/mermaid.go"
-    _ "github.com/dreampuf/mermaid.go/mermanwasm"
-)
+import "github.com/dreampuf/mermaid.go/mermanwasm"
 
-re, err := mermaid_go.NewMermanWasmEngine(context.Background())
+re, err := mermanwasm.New(context.Background())
 if err != nil {
     panic(err)
 }
@@ -368,37 +355,37 @@ svg, err := re.Render("graph TD; A-->B;")
 
 For the math or full build, take `lib/merman_wasi.wasm` from that build's
 `merman-sdk-wasi-<build>-wasm32-wasip1.tar.xz` on the
-[release page](https://github.com/Latias94/merman/releases) and pass it with
-`WithMermanWasmModule(bytes)`, e.g. from your own `go:embed`, or `WithMermanWasmModuleFile(path)`.
-Either option takes precedence over the registered module, and you don't need to import `mermanwasm`
-for them. Whichever module you ship, ship its notices too: `mermanwasm` carries the standard build's
-`LICENSE-*`, `THIRD_PARTY_NOTICES.md`, `THIRD_PARTY_LICENSES/` (including the bundled Cousine fonts'
-OFL) and `SOURCE_AVAILABILITY.md`.
+[release page](https://github.com/Latias94/merman/releases) and pass it with `WithModule(bytes)`,
+e.g. from your own `go:embed`, or `WithModuleFile(path)`. Whichever module you ship, ship its notices
+too: `mermanwasm` carries the standard build's `LICENSE-*`, `THIRD_PARTY_NOTICES.md`,
+`THIRD_PARTY_LICENSES/` (including the bundled Cousine fonts' OFL) and `SOURCE_AVAILABILITY.md`.
 
-`NewMermanWasmEngine` compiles the module — a few seconds for the 15–20 MB builds — and builds one
-instance from it, so a module that is missing, not a merman-wasi ABI 1 reactor, or rejects the
-configuration fails there. Compilation is the whole start-up cost; pass a cache from
-`wazero.NewCompilationCacheWithDir` to `WithMermanWasmCompilationCache` and later starts, in this
-process or the next, skip it.
+`mermanwasm.New` compiles the module — a few seconds for the 15–20 MB builds — and builds one
+instance from it. A module that is not a merman-wasi ABI 1 reactor, or does not take options schema
+2, fails there with `ErrMermanUnavailable`; a configuration merman rejects fails with
+`ErrMermanFailed`. Compilation is the whole start-up cost; pass a cache from
+`wazero.NewCompilationCacheWithDir` to `WithCompilationCache` and later starts, in this process or
+the next, skip it.
 
 A reactor instance is strictly serial, so the engine pools them: renders run concurrently up to
-`WithMermanWasmConcurrency` (default `GOMAXPROCS`), each on its own instance with its own linear
-memory, created on demand and kept for reuse. An instance interrupted by a deadline or cancellation,
-or one that traps, is thrown away rather than reused — the next render builds a fresh one, at a cost
-of about 0.2 s — so a timeout never spoils the engine.
+`WithConcurrency` (default `GOMAXPROCS`), each on its own instance with its own linear memory,
+created on demand and kept for reuse. An instance interrupted by a deadline or cancellation, or one
+that traps, is thrown away rather than reused, and so is one that grew past 64 MiB, since linear
+memory never shrinks. The next render builds a fresh one, in tens of milliseconds and outside its own
+deadline, so a timeout never spoils the engine.
 
 | Option | Effect |
 | --- | --- |
-| `WithMermanWasmModule(bytes)` / `WithMermanWasmModuleFile(path)` | The `merman_wasi.wasm` reactor, as bytes (e.g. from `go:embed`) or from disk. Default: `MermanWasmModule`, which importing `mermanwasm` sets. |
-| `WithMermanWasmSvgID(id)` | Root `<svg>` id and marker prefix. Default `"mermaid"`. |
-| `WithMermanWasmTheme(name)` | Mermaid theme. Takes precedence over a theme in the site configuration. |
-| `WithMermanWasmSiteConfig(json)` | A Mermaid configuration object, the in-memory counterpart of `WithMermanConfigFile`. |
-| `WithMermanWasmFont(bytes)` | A TrueType/OpenType font for text measurement and PNG painting, ahead of the bundled Cousine. Repeatable. Needed for CJK or emoji. |
-| `WithMermanWasmOptions(json)` | Raw merman binding options (schema 2) merged over the ones built from the other options, for what this package does not model: resource profiles and limits, viewport sizes, presentation themes. |
-| `WithMermanWasmConcurrency(n)` | How many instances, and so renders, at once. Default: `GOMAXPROCS`. |
-| `WithMermanWasmMemoryLimit(bytes)` | Linear memory cap per instance. Default: `DefaultMermanWasmMemoryLimit`, 512 MiB. |
-| `WithMermanWasmCompilationCache(cache)` | Shares compiled code between engines, and across processes with a directory-backed cache. |
-| `WithMermanWasmStartupTimeout(d)` | Bounds compilation and the first instance when `ctx` has no deadline. Default: `DefaultStartupTimeout`. |
+| `WithModule(bytes)` / `WithModuleFile(path)` | Another `merman_wasi.wasm` reactor, as bytes (e.g. from `go:embed`) or from disk. Default: the embedded standard build, `mermanwasm.Module`. |
+| `WithSvgID(id)` | Root `<svg>` id and marker prefix. Default `"mermaid"`. |
+| `WithTheme(name)` | Mermaid theme. Takes precedence over a theme in the site configuration. |
+| `WithSiteConfig(json)` | A Mermaid configuration object, the in-memory counterpart of `WithMermanConfigFile`. |
+| `WithFont(bytes)` | A TrueType/OpenType font for text measurement and PNG painting, ahead of the bundled Cousine. Repeatable. Needed for CJK or emoji. |
+| `WithOptions(json)` | Raw merman binding options (schema 2), each group merged key by key over the one built from the other options, for what this package does not model: resource profiles and limits, viewport sizes, presentation themes. |
+| `WithConcurrency(n)` | How many instances, and so renders, at once. Default: `GOMAXPROCS`. |
+| `WithMemoryLimit(bytes)` | Linear memory cap per instance. Default: `DefaultMemoryLimit`, 512 MiB. |
+| `WithCompilationCache(cache)` | Shares compiled code between engines, and across processes with a directory-backed cache. |
+| `WithStartupTimeout(d)` | Bounds compilation and the first instance when `ctx` has no deadline, and building a replacement instance during a render. Default: `DefaultStartupTimeout`. |
 
 `Version()` reports the merman release the module was built from and `Capabilities()` its compiled
 features, which tell the three builds apart. The module has no filesystem, network, clock or
@@ -417,9 +404,10 @@ style through `themeVariables` instead.
    `git clone https://github.com/dreampuf/mermaid.go.git`
 2. Update the embedded assets to their latest releases (optional, as both are checked in):
    `make update`, or `make update-mermaidjs` / `make update-mermanwasm` for one of them. Pin a
-   release with `MERMAID_VERSION=12.2.0` or `MERMAN_VERSION=v0.9.3`. The merman target verifies the
-   SDK download and the module's checksum, refreshes the notices in `mermanwasm/`, and moves CI's
-   `merman-cli` pin to the same release. It needs `curl`, `jq`, `tar` and `sha256sum`.
+   release with `MERMAID_VERSION=12.2.0` or `MERMAN_VERSION=v0.9.3`. Both downloads are checked
+   against the checksums their registries publish. The merman target also checks the module against
+   the SDK's manifest, refreshes the notices in `mermanwasm/`, and moves CI's `merman-cli` pin to the
+   same release. See `scripts/update-assets.sh` for the tools it needs.
 3. Run tests:
    `go test -v ./...`
 
@@ -427,8 +415,7 @@ style through `themeVariables` instead.
    subtests that exercise a *real* merman (`TestMermanEngine_LiveRender`, `TestMermanEngine_LivePng`)
    skip unless `merman-cli` is on `PATH` — CI installs it, and locally the
    [release binaries](https://github.com/Latias94/merman/releases) or `cargo install merman-cli` will
-   do. The WebAssembly tests (`TestMermanWasmEngine_Live*`) run against the module in
-   `mermanwasm/`, or against another build that `MERMAN_WASI_MODULE` names. Only the caller-font case
+   do. The WebAssembly tests (`mermanwasm`'s `TestEngine_Live*`) run against the embedded module, or against another build that `MERMAN_WASI_MODULE` names. Only the caller-font case
    needs more: `MERMAN_WASI_FONT`, naming a font file, or it skips:
 
    ```shell

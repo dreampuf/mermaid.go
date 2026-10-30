@@ -16,6 +16,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/dreampuf/mermaid.go/internal/fixtures"
 )
 
 // defaultFakeCapabilities mirrors the shape of `merman-cli capabilities --json`
@@ -607,69 +609,6 @@ func TestMermanEngine_Lifecycle(t *testing.T) {
 	})
 }
 
-func TestBundleSource(t *testing.T) {
-	cases := []struct {
-		name, svg, want string
-		wantErr         bool
-	}{
-		{
-			name: "PlainRoot",
-			svg:  `<svg id="mermaid"><g/></svg>`,
-			want: `<svg id="mermaid"><desc>a-&gt;b</desc><g/></svg>`,
-		},
-		{
-			name: "AttributeContainingAngleBrackets",
-			// A '>' inside an attribute value must not be mistaken for the end
-			// of the start tag, or the <desc> lands inside the attribute.
-			svg:  `<svg data-note="a > b"><g/></svg>`,
-			want: `<svg data-note="a > b"><desc>a-&gt;b</desc><g/></svg>`,
-		},
-		{
-			name: "XMLPrologue",
-			svg:  `<?xml version="1.0"?><svg><g/></svg>`,
-			want: `<?xml version="1.0"?><svg><desc>a-&gt;b</desc><g/></svg>`,
-		},
-		{
-			name: "SelfClosingRoot",
-			svg:  `<svg width="10"/>`,
-			want: `<svg width="10"><desc>a-&gt;b</desc></svg>`,
-		},
-		{
-			// XML allows space before the '/' but not between '/' and '>'
-			// (EmptyElemTag ::= '<' Name (S Attribute)* S? '/>'), so looking at
-			// the character before '>' is enough to recognise every valid form.
-			name: "SelfClosingRootWithSpace",
-			svg:  `<svg width="10" />`,
-			want: `<svg width="10" ><desc>a-&gt;b</desc></svg>`,
-		},
-		{
-			name: "SelfClosingRootAcrossLines",
-			svg:  "<svg width=\"10\"\n/>",
-			want: "<svg width=\"10\"\n><desc>a-&gt;b</desc></svg>",
-		},
-		{name: "NotAnSvg", svg: "kaboom", wantErr: true},
-		{name: "UnterminatedStartTag", svg: `<svg id="mermaid"`, wantErr: true},
-	}
-
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			got, err := bundleSource(tc.svg, "a->b")
-			if tc.wantErr {
-				if !errors.Is(err, ErrMermanFailed) {
-					t.Fatalf("bundleSource() error = %v, want ErrMermanFailed", err)
-				}
-				return
-			}
-			if err != nil {
-				t.Fatalf("bundleSource() error = %v", err)
-			}
-			if got != tc.want {
-				t.Errorf("bundleSource() = %q, want %q", got, tc.want)
-			}
-		})
-	}
-}
-
 // liveMermanEngine builds an engine on a real merman binary, skipping when none
 // is installed. The fake binary keeps this package honest about its own side of
 // the contract; only a real binary proves the command line it builds is one
@@ -687,68 +626,12 @@ func liveMermanEngine(t *testing.T, opts ...MermanOption) *MermanEngine {
 	return engine
 }
 
-// liveDiagrams are the families the chrome backend is tested against, so the
-// merman backends are held to the same diagrams rather than to a merman-shaped
-// subset.
-var liveDiagrams = map[string]string{
-	"Flowchart": `graph TD;
-    A-->B;
-    A-->C;
-    B-->D;
-    C-->D;`,
-	"Sequence": `sequenceDiagram
-    participant Alice
-    participant Bob
-    Alice->>John: Hello John, how are you?
-    loop Healthcheck
-    John->>John: Fight against hypochondria
-    end
-    Note right of John: Rational thoughts <br/>prevail!
-    John-->>Alice: Great!`,
-	"Gantt": `gantt
-dateFormat  YYYY-MM-DD
-title Adding GANTT diagram to mermaid
-section A section
-Completed task            :done,    des1, 2014-01-06,2014-01-08
-Active task               :active,  des2, 2014-01-09, 3d`,
-	"Class": `classDiagram
-Class01 <|-- AveryLongClass : Cool
-Class03 *-- Class04
-Class07 : equals()
-Class01 : size()`,
-	"GitGraph": `gitGraph
-       commit
-       branch develop
-       commit
-       checkout main
-       merge develop`,
-	"Entity": `erDiagram
-    CUSTOMER ||--o{ ORDER : places
-    ORDER ||--|{ LINE-ITEM : contains`,
-	"Journey": `journey
-    title My working day
-    section Go to work
-      Make tea: 5: Me
-      Do work: 1: Me, Cat`,
-	"State": `stateDiagram-v2
-    [*] --> Still
-    Still --> Moving
-    Moving --> [*]`,
-	"Pie": `pie title Pets
-    "Dogs" : 386
-    "Cats" : 85`,
-	"QuotedLabels": `graph TD;
-    A-->B['name'];
-    A-->C["pic"];`,
-	"MarkdownLabel": "graph TD;\n\tA-->B[\"`Hello World`\"];\n\tB-->C;",
-}
-
 func TestMermanEngine_LiveRender(t *testing.T) {
 	engine := liveMermanEngine(t)
 	t.Logf("merman %s (mermaid %q, capabilities %v) at %s",
 		engine.Version(), engine.MermaidVersion(), engine.Capabilities(), engine.Binary())
 
-	for name, content := range liveDiagrams {
+	for name, content := range fixtures.Diagrams {
 		t.Run(name, func(t *testing.T) {
 			svg, err := engine.Render(content)
 			if err != nil {
