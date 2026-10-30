@@ -31,7 +31,6 @@ package mermaid_go
 
 import (
 	"context"
-	_ "embed"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -47,7 +46,14 @@ import (
 	"github.com/chromedp/chromedp"
 )
 
-//go:embed mermaid.min.js
+// SourceMermaid is the mermaid.js bundle NewRenderEngine loads into the page.
+// This package embeds none, so that a program which only renders through merman
+// does not carry it: import the mermaidjs subpackage, which sets it to the
+// bundle it embeds,
+//
+//	import _ "github.com/dreampuf/mermaid.go/mermaidjs"
+//
+// or assign a bundle of your own before calling NewRenderEngine.
 var SourceMermaid string
 
 var DefaultPage = `data:text/html,<!DOCTYPE html>
@@ -155,6 +161,11 @@ func NewRenderEngine(ctx context.Context, statements []string, options ...chrome
 	var (
 		result string
 	)
+
+	// Fail before launching a browser that could never render anything.
+	if SourceMermaid == "" {
+		return nil, fmt.Errorf(`%w: no mermaid.js bundle; import _ "github.com/dreampuf/mermaid.go/mermaidjs" or set SourceMermaid`, ErrMermaidNotReady)
+	}
 
 	args := make([]chromedp.ExecAllocatorOption, 0, len(chromedp.DefaultExecAllocatorOptions)+len(options)+1)
 	args = append(args, chromedp.DefaultExecAllocatorOptions[:]...)

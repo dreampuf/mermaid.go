@@ -11,7 +11,8 @@ import (
 // choose between them at startup and pass one around without caring which it
 // got. [RenderEngine] drives a headless chrome through chromedp; [MermanEngine]
 // shells out to the merman CLI, which parses and lays diagrams out natively and
-// therefore needs no browser at all.
+// therefore needs no browser at all; [MermanWasmEngine] runs merman's
+// WebAssembly build in process, needing neither a browser nor a binary.
 //
 // Backend-specific facilities stay off the interface: chrome's crash and console
 // reporting ([RenderEngine.CrashError], [RenderEngine.SetTargetCrashedHandler],
@@ -30,6 +31,7 @@ type Renderer interface {
 var (
 	_ Renderer = (*RenderEngine)(nil)
 	_ Renderer = (*MermanEngine)(nil)
+	_ Renderer = (*MermanWasmEngine)(nil)
 )
 
 // waitForSlot waits for a render's turn, giving up if the caller's context is

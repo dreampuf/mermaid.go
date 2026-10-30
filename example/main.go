@@ -5,6 +5,7 @@ import (
 	"os"
 
 	"github.com/dreampuf/mermaid.go"
+	_ "github.com/dreampuf/mermaid.go/mermaidjs"
 )
 
 func main() {
