@@ -415,8 +415,11 @@ style through `themeVariables` instead.
 
 1. Checkout the code base:
    `git clone https://github.com/dreampuf/mermaid.go.git`
-2. Fetch the latest version of `mermaid.js` (optional, as it's already embedded):
-    `curl -Lo mermaidjs/mermaid.min.js https://unpkg.com/mermaid/dist/mermaid.min.js`
+2. Update the embedded assets to their latest releases (optional, as both are checked in):
+   `make update`, or `make update-mermaidjs` / `make update-mermanwasm` for one of them. Pin a
+   release with `MERMAID_VERSION=12.2.0` or `MERMAN_VERSION=v0.9.3`. The merman target verifies the
+   SDK download and the module's checksum, refreshes the notices in `mermanwasm/`, and moves CI's
+   `merman-cli` pin to the same release. It needs `curl`, `jq`, `tar` and `sha256sum`.
 3. Run tests:
    `go test -v ./...`
 
@@ -429,7 +432,7 @@ style through `themeVariables` instead.
    needs more: `MERMAN_WASI_FONT`, naming a font file, or it skips:
 
    ```shell
-   MERMAN_WASI_MODULE=/path/to/lib/merman_wasi.wasm MERMAN_WASI_FONT=/path/to/fonts/Cousine-Regular.ttf go test ./...
+   MERMAN_WASI_MODULE=/path/to/lib/merman_wasi.wasm MERMAN_WASI_FONT=/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf go test ./...
    ```
 
 ## License
