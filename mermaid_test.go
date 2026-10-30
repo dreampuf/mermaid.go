@@ -15,6 +15,8 @@ import (
 	"github.com/chromedp/cdproto/inspector"
 	"github.com/chromedp/cdproto/page"
 	"github.com/chromedp/chromedp"
+
+	"github.com/dreampuf/mermaid.go/internal/render"
 )
 
 // renderTimeout bounds engine startup in the subtests that launch their own
@@ -263,8 +265,8 @@ Class08 <--> C2: Cool label`},
 		SourceMermaid = ""
 		defer func() { SourceMermaid = source }()
 		engine, err := NewRenderEngine(context.Background(), nil)
-		if !errors.Is(err, ErrMermaidNotReady) || !strings.Contains(err.Error(), "mermaidjs") {
-			t.Errorf("NewRenderEngine() without a bundle = %v, %v, want ErrMermaidNotReady naming the mermaidjs package", engine, err)
+		if !errors.Is(err, ErrMermaidNotReady) || engine != nil {
+			t.Errorf("NewRenderEngine() without a bundle = %v, %v, want ErrMermaidNotReady", engine, err)
 		}
 	})
 
@@ -670,7 +672,7 @@ func TestRenderEngine_renderContext(t *testing.T) {
 		caller, cancel := context.WithDeadline(context.Background(), want)
 		defer cancel()
 
-		ctx, done := re.renderContext(caller, &renderOptions{})
+		ctx, done := re.renderContext(caller, &render.Options{})
 		defer done()
 
 		got, ok := ctx.Deadline()
@@ -687,7 +689,7 @@ func TestRenderEngine_renderContext(t *testing.T) {
 		caller, cancel := context.WithTimeout(context.Background(), time.Hour)
 		defer cancel()
 
-		ctx, done := re.renderContext(caller, &renderOptions{})
+		ctx, done := re.renderContext(caller, &render.Options{})
 		defer done()
 
 		got, ok := ctx.Deadline()
@@ -703,7 +705,7 @@ func TestRenderEngine_renderContext(t *testing.T) {
 		re.SetRenderTimeout(time.Hour)
 		caller, cancel := context.WithCancel(context.Background())
 
-		ctx, done := re.renderContext(caller, &renderOptions{})
+		ctx, done := re.renderContext(caller, &render.Options{})
 		defer done()
 
 		cancel()
@@ -716,7 +718,7 @@ func TestRenderEngine_renderContext(t *testing.T) {
 
 	t.Run("NoDeadlineWhenBothDisabled", func(t *testing.T) {
 		re.SetRenderTimeout(0)
-		ctx, done := re.renderContext(context.Background(), &renderOptions{})
+		ctx, done := re.renderContext(context.Background(), &render.Options{})
 		defer done()
 		if _, ok := ctx.Deadline(); ok {
 			t.Error("renderContext() set a deadline when both the engine and the caller declined one")
