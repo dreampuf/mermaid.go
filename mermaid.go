@@ -225,12 +225,8 @@ func NewRenderEngine(ctx context.Context, statements []string, options ...chrome
 		// lifetime of the engine whether or not a handler is installed.
 		go engine.forwardConsole(chromedp.Console(ctx))
 
-		startCtx := ctx
-		if _, ok := ctx.Deadline(); !ok {
-			var startCancel context.CancelFunc
-			startCtx, startCancel = context.WithTimeout(ctx, DefaultStartupTimeout)
-			defer startCancel()
-		}
+		startCtx, startCancel := startupContext(ctx, DefaultStartupTimeout)
+		defer startCancel()
 		err = chromedp.Do(startCtx, actions...)
 		if err == nil {
 			result, err = chromedp.Run(startCtx, chromedp.Evaluate[string]("typeof mermaid"))
@@ -394,6 +390,23 @@ type renderOptions struct {
 	hasTimeout bool
 }
 
+func newRenderOptions(opts []RenderOption) *renderOptions {
+	o := &renderOptions{}
+	for _, opt := range opts {
+		opt(o)
+	}
+	return o
+}
+
+// timeoutOr is the per-render deadline this call asked for, defaulting to the
+// engine's. A value <= 0 means no deadline of our own.
+func (o *renderOptions) timeoutOr(engine *atomic.Int64) time.Duration {
+	if o.hasTimeout {
+		return o.timeout
+	}
+	return time.Duration(engine.Load())
+}
+
 func WithBundle() RenderOption {
 	return func(o *renderOptions) {
 		o.bundle = true
@@ -457,16 +470,7 @@ func (r *RenderEngine) withBrowserExit(err error) error {
 // very first Run against a fresh engine, which is why NewRenderEngine allocates
 // the browser separately -- see the comment there.
 func (r *RenderEngine) renderContext(caller context.Context, opts *renderOptions) (context.Context, context.CancelFunc) {
-	return deriveRenderContext(r.ctx, caller, r.effectiveTimeout(opts))
-}
-
-// effectiveTimeout is the per-render deadline this call asked for, defaulting to
-// the engine's. A value <= 0 means no deadline of our own.
-func (r *RenderEngine) effectiveTimeout(opts *renderOptions) time.Duration {
-	if opts.hasTimeout {
-		return opts.timeout
-	}
-	return time.Duration(r.renderTimeout.Load())
+	return deriveRenderContext(r.ctx, caller, opts.timeoutOr(&r.renderTimeout))
 }
 
 // annotateCrash classifies a render failure so callers can act on it without
@@ -506,10 +510,7 @@ func (r *RenderEngine) RenderContext(ctx context.Context, content string, opts .
 		result string
 	)
 
-	renderOpts := &renderOptions{}
-	for _, opt := range opts {
-		opt(renderOpts)
-	}
+	renderOpts := newRenderOptions(opts)
 
 	encodedContent, err := jsonMarshal(content)
 	if err != nil {
@@ -558,10 +559,7 @@ func (r *RenderEngine) RenderAsScaledPng(content string, scale float64, opts ...
 // it returns no image and no box model, so a caller cannot mistake a partial
 // screenshot for a complete one.
 func (r *RenderEngine) RenderAsScaledPngContext(ctx context.Context, content string, scale float64, opts ...RenderOption) ([]byte, *BoxModel, error) {
-	renderOpts := &renderOptions{}
-	for _, opt := range opts {
-		opt(renderOpts)
-	}
+	renderOpts := newRenderOptions(opts)
 	if renderOpts.bundle {
 		return nil, nil, fmt.Errorf("%w: WithBundle has no effect on a PNG, the source is embedded in the SVG's <desc>", ErrUnsupportedOption)
 	}

@@ -7,14 +7,12 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"image/png"
-	"math"
 	"os"
 	"runtime"
-	"sort"
+	"slices"
+	"strconv"
 	"sync/atomic"
 	"time"
-	"unicode/utf8"
 
 	"github.com/tetratelabs/wazero"
 	"github.com/tetratelabs/wazero/api"
@@ -70,8 +68,8 @@ type MermanWasmEngine struct {
 	compiled wazero.CompiledModule
 	// config and fonts are the constructor inputs every new instance's merman
 	// engine is built from.
-	config []byte
-	fonts  []byte
+	config string
+	fonts  string
 
 	// sem bounds how many renders run at once; idle holds instances between
 	// renders. idle has the same capacity as sem, and an instance is only ever
@@ -86,8 +84,9 @@ type MermanWasmEngine struct {
 
 	renderTimeout atomic.Int64
 
-	version      string
-	capabilities map[string]bool
+	version string
+	// capabilities is sorted; operations is for lookups.
+	capabilities []string
 	operations   map[string]bool
 }
 
@@ -215,12 +214,7 @@ const mermanWasmOptionsSchema = 2
 // context.Background() and let each render carry its own deadline; to bound
 // only start-up, pass WithMermanWasmStartupTimeout.
 func NewMermanWasmEngine(ctx context.Context, opts ...MermanWasmOption) (_ *MermanWasmEngine, err error) {
-	cfg := &mermanWasmConfig{
-		svgID:          DefaultMermanSvgID,
-		concurrency:    runtime.GOMAXPROCS(0),
-		memoryLimit:    DefaultMermanWasmMemoryLimit,
-		startupTimeout: DefaultStartupTimeout,
-	}
+	cfg := &mermanWasmConfig{svgID: DefaultMermanSvgID, startupTimeout: DefaultStartupTimeout}
 	for _, opt := range opts {
 		opt(cfg)
 	}
@@ -231,14 +225,17 @@ func NewMermanWasmEngine(ctx context.Context, opts ...MermanWasmOption) (_ *Merm
 		cfg.memoryLimit = DefaultMermanWasmMemoryLimit
 	}
 
-	module := cfg.module
-	if module == nil && cfg.moduleFile == "" {
-		module = MermanWasmModule
-	}
-	if cfg.moduleFile != "" {
+	// The module options clear each other, so at most one of them is set.
+	var module []byte
+	switch {
+	case cfg.moduleFile != "":
 		if module, err = os.ReadFile(cfg.moduleFile); err != nil {
 			return nil, fmt.Errorf("%w: %w", ErrMermanUnavailable, err)
 		}
+	case cfg.module != nil:
+		module = cfg.module
+	default:
+		module = MermanWasmModule
 	}
 	if len(module) == 0 {
 		return nil, fmt.Errorf(`%w: no module supplied; import _ "github.com/dreampuf/mermaid.go/mermanwasm", or pass WithMermanWasmModule or WithMermanWasmModuleFile`, ErrMermanUnavailable)
@@ -249,12 +246,8 @@ func NewMermanWasmEngine(ctx context.Context, opts ...MermanWasmOption) (_ *Merm
 		return nil, err
 	}
 
-	startCtx := ctx
-	if _, ok := ctx.Deadline(); !ok && cfg.startupTimeout > 0 {
-		var cancel context.CancelFunc
-		startCtx, cancel = context.WithTimeout(ctx, cfg.startupTimeout)
-		defer cancel()
-	}
+	startCtx, cancel := startupContext(ctx, cfg.startupTimeout)
+	defer cancel()
 
 	pages := uint32(min(cfg.memoryLimit/65536, 65536))
 	rtConfig := wazero.NewRuntimeConfig().
@@ -268,8 +261,8 @@ func NewMermanWasmEngine(ctx context.Context, opts ...MermanWasmOption) (_ *Merm
 
 	e := &MermanWasmEngine{
 		runtime: wazero.NewRuntimeWithConfig(ctx, rtConfig),
-		config:  config,
-		fonts:   fonts,
+		config:  string(config),
+		fonts:   string(fonts),
 		sem:     make(chan struct{}, cfg.concurrency),
 		idle:    make(chan *mermanWasmInstance, cfg.concurrency),
 		closed:  make(chan struct{}),
@@ -307,15 +300,12 @@ func NewMermanWasmEngine(ctx context.Context, opts ...MermanWasmOption) (_ *Merm
 	}
 	e.idle <- inst
 
-	if !containsInt(catalog.OptionsSchemaVersions, mermanWasmOptionsSchema) {
+	if !slices.Contains(catalog.OptionsSchemaVersions, mermanWasmOptionsSchema) {
 		return nil, fmt.Errorf("%w: module accepts options schemas %v, this package writes schema %d",
 			ErrMermanUnavailable, catalog.OptionsSchemaVersions, mermanWasmOptionsSchema)
 	}
 	e.version = catalog.PackageVersion
-	e.capabilities = make(map[string]bool, len(catalog.Capabilities.CapabilityIDs))
-	for _, id := range catalog.Capabilities.CapabilityIDs {
-		e.capabilities[id] = true
-	}
+	e.capabilities = slices.Sorted(slices.Values(catalog.Capabilities.CapabilityIDs))
 	e.operations = make(map[string]bool, len(catalog.Capabilities.OperationIDs))
 	for _, id := range catalog.Capabilities.OperationIDs {
 		e.operations[id] = true
@@ -324,15 +314,6 @@ func NewMermanWasmEngine(ctx context.Context, opts ...MermanWasmOption) (_ *Merm
 		return nil, fmt.Errorf("%w: module cannot render SVG", ErrMermanCapability)
 	}
 	return e, nil
-}
-
-func containsInt(values []int, want int) bool {
-	for _, v := range values {
-		if v == want {
-			return true
-		}
-	}
-	return false
 }
 
 // startErr reports a failure building the engine, preferring the context's
@@ -347,20 +328,11 @@ func (m *MermanWasmEngine) startErr(ctx context.Context, step string, err error)
 // mermanWasmConstructorInputs builds the configuration envelope every instance's
 // merman engine is constructed from, and the font blob its ranges point into.
 func mermanWasmConstructorInputs(cfg *mermanWasmConfig) (config, fonts []byte, err error) {
+	// Marshalling string maps and raw JSON that has just been decoded cannot
+	// fail, so those errors are not checked.
 	options := map[string]json.RawMessage{}
-	setGroup := func(name string, value any) error {
-		raw, err := json.Marshal(value)
-		if err != nil {
-			return fmt.Errorf("%w: options group %s: %w", ErrMermanFailed, name, err)
-		}
-		options[name] = raw
-		return nil
-	}
-
 	if cfg.svgID != "" {
-		if err := setGroup("svg", map[string]string{"diagram_id": cfg.svgID}); err != nil {
-			return nil, nil, err
-		}
+		options["svg"], _ = json.Marshal(map[string]string{"diagram_id": cfg.svgID})
 	}
 	site := map[string]json.RawMessage{}
 	if len(cfg.siteConfig) > 0 {
@@ -373,9 +345,7 @@ func mermanWasmConstructorInputs(cfg *mermanWasmConfig) (config, fonts []byte, e
 		site["theme"] = raw
 	}
 	if len(site) > 0 {
-		if err := setGroup("site_config", site); err != nil {
-			return nil, nil, err
-		}
+		options["site_config"], _ = json.Marshal(site)
 	}
 	if len(cfg.options) > 0 {
 		var extra map[string]json.RawMessage
@@ -396,14 +366,19 @@ func mermanWasmConstructorInputs(cfg *mermanWasmConfig) (config, fonts []byte, e
 		Length uint32 `json:"length"`
 	}
 	ranges := make([]fontRange, 0, len(cfg.fonts))
+	total := 0
 	for i, font := range cfg.fonts {
 		if len(font) == 0 {
 			return nil, nil, fmt.Errorf("%w: font %d is empty", ErrMermanFailed, i)
 		}
-		if len(font) > mermanWasmMaxInput-len(fonts) {
+		if len(font) > mermanWasmMaxInput-total {
 			return nil, nil, fmt.Errorf("%w: fonts exceed the %d MiB the module accepts", ErrMermanFailed, mermanWasmMaxInput>>20)
 		}
-		ranges = append(ranges, fontRange{uint32(len(fonts)), uint32(len(font))})
+		ranges = append(ranges, fontRange{uint32(total), uint32(len(font))})
+		total += len(font)
+	}
+	fonts = make([]byte, 0, total)
+	for _, font := range cfg.fonts {
 		fonts = append(fonts, font...)
 	}
 
@@ -443,14 +418,7 @@ func (m *MermanWasmEngine) Version() string { return m.version }
 // Capabilities reports the merman features the module was compiled with,
 // sorted, using merman's own ids: "svg", "png", "math", "layout-elk" and so on.
 // They are what distinguishes the SDK's standard, math and full modules.
-func (m *MermanWasmEngine) Capabilities() []string {
-	ids := make([]string, 0, len(m.capabilities))
-	for id := range m.capabilities {
-		ids = append(ids, id)
-	}
-	sort.Strings(ids)
-	return ids
-}
+func (m *MermanWasmEngine) Capabilities() []string { return slices.Clone(m.capabilities) }
 
 // SetRenderTimeout overrides DefaultRenderTimeout for subsequent renders. A
 // value <= 0 disables the per-render deadline, leaving renders bounded only by
@@ -475,19 +443,12 @@ func (m *MermanWasmEngine) Render(content string, opts ...RenderOption) (string,
 // and its deadline applies if it is sooner than the engine's render timeout.
 // Only cancellation and the deadline are taken from ctx; its values are not.
 func (m *MermanWasmEngine) RenderContext(ctx context.Context, content string, opts ...RenderOption) (string, error) {
-	renderOpts := &renderOptions{}
-	for _, opt := range opts {
-		opt(renderOpts)
-	}
+	renderOpts := newRenderOptions(opts)
 	out, err := m.run(ctx, renderOpts, "svg", nil, content)
 	if err != nil {
 		return "", err
 	}
-	svg := string(out)
-	if renderOpts.bundle {
-		return bundleSource(svg, content)
-	}
-	return svg, nil
+	return mermanSVG(out, content, renderOpts)
 }
 
 // RenderAsPng renders content to a PNG. It is equivalent to RenderAsPngContext
@@ -511,40 +472,25 @@ func (m *MermanWasmEngine) RenderAsScaledPng(content string, scale float64, opts
 // up if ctx is cancelled. The box model is derived from the image as it is for
 // [MermanEngine.RenderAsScaledPngContext].
 func (m *MermanWasmEngine) RenderAsScaledPngContext(ctx context.Context, content string, scale float64, opts ...RenderOption) ([]byte, *BoxModel, error) {
-	renderOpts := &renderOptions{}
-	for _, opt := range opts {
-		opt(renderOpts)
-	}
-	if renderOpts.bundle {
-		return nil, nil, fmt.Errorf("%w: WithBundle has no effect on a PNG, the source is embedded in the SVG's <desc>", ErrUnsupportedOption)
-	}
-	if math.IsNaN(scale) || math.IsInf(scale, 0) || scale <= 0 {
-		return nil, nil, fmt.Errorf("%w: scale must be a positive, finite number, got %v", ErrUnsupportedOption, scale)
+	renderOpts, err := mermanPngOptions(opts, scale)
+	if err != nil {
+		return nil, nil, err
 	}
 	if !m.operations["png"] {
 		return nil, nil, fmt.Errorf("%w: module was built without png output", ErrMermanCapability)
 	}
 
-	var options []byte
+	var options json.RawMessage
 	if scale != 1 {
-		var err error
-		options, err = json.Marshal(map[string]any{
-			"version": mermanWasmOptionsSchema,
-			"raster":  map[string]float64{"scale": scale},
-		})
-		if err != nil {
-			return nil, nil, fmt.Errorf("%w: %w", ErrFailedEncoding, err)
-		}
+		// scale is finite and positive, so it formats as a JSON number.
+		options = fmt.Appendf(nil, `{"version":%d,"raster":{"scale":%s}}`,
+			mermanWasmOptionsSchema, strconv.FormatFloat(scale, 'g', -1, 64))
 	}
 	out, err := m.run(ctx, renderOpts, "png", options, content)
 	if err != nil {
 		return nil, nil, err
 	}
-	config, err := png.DecodeConfig(bytes.NewReader(out))
-	if err != nil {
-		return nil, nil, fmt.Errorf("%w: module returned an unreadable png: %w", ErrMermanFailed, err)
-	}
-	return out, boxModelFor(float64(config.Width)/scale, float64(config.Height)/scale), nil
+	return mermanPng(out, scale, "module")
 }
 
 // run executes one operation on a pooled instance and returns its output.
@@ -558,11 +504,7 @@ func (m *MermanWasmEngine) run(caller context.Context, opts *renderOptions, oper
 	}
 	defer release()
 
-	timeout := time.Duration(m.renderTimeout.Load())
-	if opts.hasTimeout {
-		timeout = opts.timeout
-	}
-	runCtx, cancel := deriveRenderContext(m.ctx, caller, timeout)
+	runCtx, cancel := deriveRenderContext(m.ctx, caller, opts.timeoutOr(&m.renderTimeout))
 	defer cancel()
 
 	var inst *mermanWasmInstance
@@ -574,12 +516,12 @@ func (m *MermanWasmEngine) run(caller context.Context, opts *renderOptions, oper
 		}
 	}
 
-	out, err := inst.execute(runCtx, operation, options, []byte(content))
-	// An instance is only worth keeping when it finished the call cleanly: one
-	// interrupted mid-call is closed already, and one that trapped or broke the
-	// ABI's contract is in a state the ABI makes no promises about.
-	var owned *MermanWasmError
-	if (err == nil || errors.As(err, &owned)) && !inst.broken && m.ctx.Err() == nil {
+	out, err := inst.execute(runCtx, operation, options, content)
+	// An instance is only worth keeping when it finished the call cleanly or
+	// with an ordinary failure: one interrupted mid-call is closed already, and
+	// one that trapped or broke the ABI's contract is in a state the ABI makes
+	// no promises about. Every such path marks it broken.
+	if !inst.broken && m.ctx.Err() == nil {
 		m.idle <- inst
 	} else {
 		inst.close()
@@ -626,14 +568,24 @@ type MermanWasmError struct {
 
 func (e *MermanWasmError) Error() string { return e.CodeName + ": " + e.Message }
 
-// mermanWasmError classifies an owned failure. The statuses attributable to the
-// diagram -- it is not UTF-8, names no diagram, does not parse or render, or
-// exceeds a resource limit -- become the same non-retryable ErrRenderException
-// an invalid diagram raises under the other backends.
+// mermanWasmError decodes an owned failure's payload.
 func mermanWasmError(payload []byte) error {
 	owned := &MermanWasmError{}
 	if err := json.Unmarshal(payload, owned); err != nil {
 		return fmt.Errorf("%w: unreadable error payload: %w", ErrMermanFailed, err)
+	}
+	return owned
+}
+
+// classifyMermanWasmRender wraps an owned failure of a render in its sentinel.
+// The statuses attributable to the diagram -- it is not UTF-8, names no
+// diagram, does not parse or render, or exceeds a resource limit -- become the
+// same non-retryable ErrRenderException an invalid diagram raises under the
+// other backends. Other errors pass through.
+func classifyMermanWasmRender(err error) error {
+	var owned *MermanWasmError
+	if !errors.As(err, &owned) {
+		return err
 	}
 	sentinel := ErrMermanFailed
 	switch {
@@ -644,7 +596,7 @@ func mermanWasmError(payload []byte) error {
 		owned.CodeName == "MERMAN_RESOURCE_LIMIT_EXCEEDED":
 		sentinel = ErrRenderException
 	}
-	return fmt.Errorf("%w: %w", sentinel, owned)
+	return fmt.Errorf("%w: %w", sentinel, err)
 }
 
 // mermanWasmInstance is one reactor instance and the merman engine built in it.
@@ -710,13 +662,7 @@ func (m *MermanWasmEngine) newInstance(ctx context.Context) (inst *mermanWasmIns
 			ErrMermanUnavailable, version, MermanWasmABIVersion)
 	}
 
-	result, err := inst.withInputs(ctx, [][]byte{m.config, m.fonts}, func(ptr []uint32) (*mermanWasmResult, error) {
-		handle, err := inst.call(ctx, engineNew, uint64(ptr[0]), uint64(len(m.config)), uint64(ptr[1]), uint64(len(m.fonts)))
-		if err != nil {
-			return nil, err
-		}
-		return inst.result(ctx, handle)
-	})
+	result, err := inst.invoke(ctx, engineNew, nil, m.config, m.fonts)
 	if err != nil {
 		var owned *MermanWasmError
 		if errors.As(err, &owned) {
@@ -760,10 +706,8 @@ func (i *mermanWasmInstance) call(ctx context.Context, fn api.Function, args ...
 
 // mermanWasmResult is a host-side copy of an owned result.
 type mermanWasmResult struct {
-	engine    uint32
-	mediaType string
-	data      []byte
-	metadata  []byte
+	engine uint32
+	data   []byte
 }
 
 // catalog reads the instance's runtime catalog.
@@ -774,7 +718,7 @@ func (i *mermanWasmInstance) catalog(ctx context.Context) (*mermanWasmCatalog, e
 	}
 	result, err := i.result(ctx, handle)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("%w: runtime catalog: %w", ErrMermanUnavailable, err)
 	}
 	catalog := &mermanWasmCatalog{}
 	if err := json.Unmarshal(result.data, catalog); err != nil {
@@ -784,8 +728,8 @@ func (i *mermanWasmInstance) catalog(ctx context.Context) (*mermanWasmCatalog, e
 }
 
 // execute runs one operation on the instance's merman engine and returns its
-// raw output.
-func (i *mermanWasmInstance) execute(ctx context.Context, operation string, options, source []byte) ([]byte, error) {
+// raw output, with an ordinary failure classified for the caller.
+func (i *mermanWasmInstance) execute(ctx context.Context, operation string, options json.RawMessage, source string) ([]byte, error) {
 	request, err := json.Marshal(struct {
 		Version   uint32          `json:"version"`
 		Operation string          `json:"operation_id"`
@@ -794,75 +738,75 @@ func (i *mermanWasmInstance) execute(ctx context.Context, operation string, opti
 	if err != nil {
 		return nil, fmt.Errorf("%w: %w", ErrFailedEncoding, err)
 	}
-	result, err := i.withInputs(ctx, [][]byte{request, source}, func(ptr []uint32) (*mermanWasmResult, error) {
-		handle, err := i.call(ctx, i.executeFn, uint64(i.engine), uint64(ptr[0]), uint64(len(request)), uint64(ptr[1]), uint64(len(source)))
-		if err != nil {
-			return nil, err
-		}
-		return i.result(ctx, handle)
-	})
+	result, err := i.invoke(ctx, i.executeFn, []uint64{uint64(i.engine)}, string(request), source)
 	if err != nil {
-		return nil, err
+		return nil, classifyMermanWasmRender(err)
 	}
 	return result.data, nil
 }
 
-// withInputs copies each input into a fresh guest allocation, runs fn with
-// their offsets and frees them again. An empty input is passed as the
-// canonical empty range, offset 0.
-func (i *mermanWasmInstance) withInputs(ctx context.Context, inputs [][]byte, fn func(ptr []uint32) (*mermanWasmResult, error)) (_ *mermanWasmResult, err error) {
-	ptr := make([]uint32, len(inputs))
+// invoke copies each input into a fresh guest allocation, calls fn with args
+// followed by each input's offset and length, frees the inputs again and
+// returns the owned result fn published. An empty input is passed as the
+// canonical empty range, offset 0. Inputs are strings so the diagram source is
+// copied once, straight into the guest.
+func (i *mermanWasmInstance) invoke(ctx context.Context, fn api.Function, args []uint64, inputs ...string) (_ *mermanWasmResult, err error) {
+	ptrs := make([]uint32, 0, len(inputs))
 	defer func() {
-		for _, p := range ptr {
-			if p == 0 || i.broken {
-				continue
+		for _, p := range ptrs {
+			if p != 0 && !i.broken {
+				err = errors.Join(err, i.release(i.free, p))
 			}
-			// Free with a live context: the render's may have expired between
-			// guest calls, and the instance is worth keeping tidy.
-			status, freeErr := i.call(context.Background(), i.free, uint64(p))
-			if freeErr == nil && int32(status) != 0 {
-				i.broken = true
-				freeErr = fmt.Errorf("%w: merman_wasi_free: status %d", ErrMermanFailed, int32(status))
-			}
-			err = errors.Join(err, freeErr)
 		}
 	}()
-	for n, input := range inputs {
-		if len(input) == 0 {
-			continue
+	for _, input := range inputs {
+		var ptr uint32
+		if len(input) > 0 {
+			if ptr, err = i.call(ctx, i.alloc, uint64(len(input))); err != nil {
+				return nil, err
+			}
+			if ptr == 0 {
+				i.broken = true
+				return nil, fmt.Errorf("%w: guest could not allocate %d bytes", ErrMermanFailed, len(input))
+			}
+			ptrs = append(ptrs, ptr)
+			if !i.mod.Memory().WriteString(ptr, input) {
+				i.broken = true
+				return nil, fmt.Errorf("%w: guest allocation out of bounds", ErrMermanFailed)
+			}
 		}
-		if ptr[n], err = i.call(ctx, i.alloc, uint64(len(input))); err != nil {
-			return nil, err
-		}
-		if ptr[n] == 0 {
-			i.broken = true
-			return nil, fmt.Errorf("%w: guest could not allocate %d bytes", ErrMermanFailed, len(input))
-		}
-		if !i.mod.Memory().Write(ptr[n], input) {
-			i.broken = true
-			return nil, fmt.Errorf("%w: guest allocation out of bounds", ErrMermanFailed)
-		}
+		args = append(args, uint64(ptr), uint64(len(input)))
 	}
-	return fn(ptr)
+	handle, err := i.call(ctx, fn, args...)
+	if err != nil {
+		return nil, err
+	}
+	return i.result(ctx, handle)
+}
+
+// release hands a guest allocation or result back through fn. It runs with a
+// live context, since the render's may have expired between guest calls and the
+// instance is worth keeping tidy; a nonzero status breaks the ABI's contract.
+func (i *mermanWasmInstance) release(fn api.Function, handle uint32) error {
+	status, err := i.call(context.Background(), fn, uint64(handle))
+	if err == nil && int32(status) != 0 {
+		i.broken = true
+		err = fmt.Errorf("%w: %s: status %d", ErrMermanFailed, fn.Definition().ExportNames()[0], int32(status))
+	}
+	return err
 }
 
 // result decodes and frees an owned result, returning an ordinary failure as
-// a classified *MermanWasmError.
+// a *MermanWasmError.
 func (i *mermanWasmInstance) result(ctx context.Context, handle uint32) (_ *mermanWasmResult, err error) {
 	if handle == 0 {
 		i.broken = true
 		return nil, fmt.Errorf("%w: guest could not publish a result", ErrMermanFailed)
 	}
 	defer func() {
-		if i.broken {
-			return
+		if !i.broken {
+			err = errors.Join(err, i.release(i.resultFree, handle))
 		}
-		status, freeErr := i.call(context.Background(), i.resultFree, uint64(handle))
-		if freeErr == nil && int32(status) != 0 {
-			i.broken = true
-			freeErr = fmt.Errorf("%w: merman_wasi_result_free: status %d", ErrMermanFailed, int32(status))
-		}
-		err = errors.Join(err, freeErr)
 	}()
 
 	ptr, err := i.call(ctx, i.resultInfo, uint64(handle))
@@ -884,25 +828,20 @@ func (i *mermanWasmInstance) result(ctx context.Context, handle uint32) (_ *merm
 			ErrMermanFailed, fields[0], fields[1], fields[2])
 	}
 
-	result := &mermanWasmResult{engine: fields[3]}
-	var media []byte
-	for _, seg := range []struct {
-		dst      *[]byte
-		ptr, len uint32
-	}{{&media, fields[4], fields[5]}, {&result.data, fields[6], fields[7]}, {&result.metadata, fields[8], fields[9]}} {
-		if *seg.dst, err = i.segment(seg.ptr, seg.len); err != nil {
+	// The media type, fields 4 and 5, is implied by the operation. The
+	// metadata, fields 8 and 9, carries the payload of an ordinary failure.
+	if fields[2] == 1 {
+		metadata, err := i.segment(fields[8], fields[9])
+		if err != nil {
 			return nil, err
 		}
+		return nil, mermanWasmError(metadata)
 	}
-	if !utf8.Valid(media) || !utf8.Valid(result.metadata) {
-		i.broken = true
-		return nil, fmt.Errorf("%w: result media type or metadata is not UTF-8", ErrMermanFailed)
+	data, err := i.segment(fields[6], fields[7])
+	if err != nil {
+		return nil, err
 	}
-	result.mediaType = string(media)
-	if fields[2] == 1 {
-		return nil, mermanWasmError(result.metadata)
-	}
-	return result, nil
+	return &mermanWasmResult{engine: fields[3], data: data}, nil
 }
 
 // segment copies a result segment out of guest memory, which the next call may

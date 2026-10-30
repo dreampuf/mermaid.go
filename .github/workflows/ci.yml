@@ -74,26 +74,12 @@ jobs:
         echo "$HOME/.local/bin" >> "$GITHUB_PATH"
         rm -rf "$workdir"
 
-    # The WebAssembly tests run the module mermanwasm embeds. The SDK is only
-    # fetched for a font, so the caller-font case runs too.
-    - name: Fetch a font from the merman WASI SDK
-      env:
-        MERMAN_VERSION: v0.9.3
-        MERMAN_SDK: merman-sdk-wasi-standard-wasm32-wasip1
+    # The WebAssembly tests run the module mermanwasm embeds. Their caller-font
+    # case needs a font file to pass in, and any font the runner has will do.
+    - name: Point the WebAssembly tests at a font
       run: |
-        set -euo pipefail
-        workdir="$(mktemp -d)"
-        cd "$workdir"
-        tarball="${MERMAN_SDK}.tar.xz"
-        base="https://github.com/Latias94/merman/releases/download/${MERMAN_VERSION}"
-        curl -fsSLO "${base}/${tarball}"
-        curl -fsSLO "${base}/${tarball}.sha256"
-        sha256sum -c "${tarball}.sha256"
-        fonts="$HOME/.local/share/merman"
-        mkdir -p "$fonts"
-        tar -xJf "${tarball}" -C "$fonts" --strip-components=2 "${MERMAN_SDK}/fonts/Cousine-Regular.ttf"
-        echo "MERMAN_WASI_FONT=$fonts/Cousine-Regular.ttf" >> "$GITHUB_ENV"
-        rm -rf "$workdir"
+        font="$(fc-list --format '%{file}\n' | grep -m1 '\.ttf$' || true)"
+        if [ -n "$font" ]; then echo "MERMAN_WASI_FONT=$font" >> "$GITHUB_ENV"; fi
 
     - name: Run unit tests
       run:  go test -v ./...

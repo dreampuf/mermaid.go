@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"image/png"
+	"math"
 	"os"
 	"slices"
 	"strings"
@@ -126,20 +127,26 @@ func TestMermanWasmErrorClassification(t *testing.T) {
 		{`{"code":3,"code_name":"MERMAN_OPTIONS_JSON_ERROR","kind":"generic","message":"bogus"}`, ErrMermanFailed},
 		{`not json`, ErrMermanFailed},
 	} {
-		err := mermanWasmError([]byte(tc.payload))
+		err := classifyMermanWasmRender(mermanWasmError([]byte(tc.payload)))
 		if !errors.Is(err, tc.want) {
-			t.Errorf("mermanWasmError(%s) = %v, want %v", tc.payload, err, tc.want)
+			t.Errorf("classifyMermanWasmRender(%s) = %v, want %v", tc.payload, err, tc.want)
 		}
 	}
 
 	var owned *MermanWasmError
-	err := mermanWasmError([]byte(`{"code":7,"code_name":"MERMAN_UNSUPPORTED_OPERATION","kind":"missing-capability","capability_id":"math","message":"no math","details":{"x":1}}`))
+	err := classifyMermanWasmRender(mermanWasmError([]byte(`{"code":7,"code_name":"MERMAN_UNSUPPORTED_OPERATION","kind":"missing-capability","capability_id":"math","message":"no math","details":{"x":1}}`)))
 	if !errors.As(err, &owned) || owned.CapabilityID != "math" || string(owned.Details) != `{"x":1}` {
-		t.Errorf("mermanWasmError() = %#v, want the payload's fields reachable", owned)
+		t.Errorf("classifyMermanWasmRender() = %#v, want the payload's fields reachable", owned)
 	}
 }
 
 func TestNewMermanWasmEngine_Unavailable(t *testing.T) {
+	// The tests import mermanwasm, which registers a default module; take it
+	// away so NoModule sees an unconfigured program.
+	defaultModule := MermanWasmModule
+	MermanWasmModule = nil
+	t.Cleanup(func() { MermanWasmModule = defaultModule })
+
 	for name, opts := range map[string][]MermanWasmOption{
 		"NoModule":      nil,
 		"MissingFile":   {WithMermanWasmModuleFile(t.TempDir() + "/missing.wasm")},
@@ -158,17 +165,15 @@ func TestNewMermanWasmEngine_Unavailable(t *testing.T) {
 
 // mermanWasmModule is the reactor the live tests run: the one MERMAN_WASI_MODULE
 // names, as in merman's own SDK examples, or else the standard build the
-// mermanwasm subpackage embeds, read from disk because importing it would be a
-// cycle. The module is compiled once and shared through a cache, since
-// compiling it takes seconds.
+// mermanwasm subpackage registers. The module is compiled once and shared
+// through a cache, since compiling it takes seconds.
 var mermanWasmModule = sync.OnceValues(func() ([]byte, wazero.CompilationCache) {
-	path := os.Getenv("MERMAN_WASI_MODULE")
-	if path == "" {
-		path = "mermanwasm/merman_wasi.wasm"
-	}
-	module, err := os.ReadFile(path)
-	if err != nil {
-		panic(fmt.Sprintf("MERMAN_WASI_MODULE: %v", err))
+	module := MermanWasmModule
+	if path := os.Getenv("MERMAN_WASI_MODULE"); path != "" {
+		var err error
+		if module, err = os.ReadFile(path); err != nil {
+			panic(fmt.Sprintf("MERMAN_WASI_MODULE: %v", err))
+		}
 	}
 	return module, wazero.NewCompilationCache()
 })
@@ -190,16 +195,7 @@ func TestMermanWasmEngine_LiveRender(t *testing.T) {
 	engine := liveMermanWasmEngine(t)
 	t.Logf("merman %s, capabilities %v", engine.Version(), engine.Capabilities())
 
-	diagrams := map[string]string{
-		"Flowchart": "graph TD;\n    A-->B;\n    A-->C;\n    B-->D;\n    C-->D;",
-		"Sequence":  "sequenceDiagram\n    Alice->>John: Hello John, how are you?\n    John-->>Alice: Great!",
-		"Class":     "classDiagram\nClass01 <|-- AveryLongClass : Cool",
-		"State":     "stateDiagram-v2\n    [*] --> Still\n    Still --> [*]",
-		"Pie":       "pie title Pets\n    \"Dogs\" : 386\n    \"Cats\" : 85",
-		"Entity":    "erDiagram\n    CUSTOMER ||--o{ ORDER : places",
-		"Gantt":     "gantt\ndateFormat  YYYY-MM-DD\nsection A section\nCompleted task :done, des1, 2014-01-06,2014-01-08",
-	}
-	for name, content := range diagrams {
+	for name, content := range liveDiagrams {
 		t.Run(name, func(t *testing.T) {
 			svg, err := engine.Render(content)
 			if err != nil {
@@ -335,12 +331,10 @@ func TestMermanWasmEngine_LivePng(t *testing.T) {
 			scaledBox.Width, scaledBox.Height, box.Width, box.Height)
 	}
 
-	for name, scale := range map[string]float64{"Zero": 0, "Negative": -1} {
-		t.Run(name, func(t *testing.T) {
-			if _, _, err := engine.RenderAsScaledPng(content, scale); !errors.Is(err, ErrUnsupportedOption) {
-				t.Errorf("RenderAsScaledPng(%v) error = %v, want ErrUnsupportedOption", scale, err)
-			}
-		})
+	for _, scale := range []float64{0, -1, math.NaN(), math.Inf(1), math.Inf(-1)} {
+		if _, _, err := engine.RenderAsScaledPng(content, scale); !errors.Is(err, ErrUnsupportedOption) {
+			t.Errorf("RenderAsScaledPng(%v) error = %v, want ErrUnsupportedOption", scale, err)
+		}
 	}
 	if _, _, err := engine.RenderAsPng(content, WithBundle()); !errors.Is(err, ErrUnsupportedOption) {
 		t.Errorf("RenderAsPng(WithBundle()) error = %v, want ErrUnsupportedOption", err)
