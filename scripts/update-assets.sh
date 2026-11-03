@@ -2,10 +2,10 @@
 # Updates an asset mermaid.go embeds to its latest release, or to the release
 # MERMAID_VERSION or MERMAN_VERSION names:
 #
-#   scripts/update-assets.sh mermaidjs   # mermaid.min.js
+#   scripts/update-assets.sh mermaidjs   # mermaid.min.js.gz
 #   scripts/update-assets.sh mermanwasm  # mermanwasm/merman_wasi.wasm and its notices
 #
-# Needs curl, jq, tar with xz support, openssl, and sha256sum or shasum.
+# Needs curl, jq, gzip, tar with xz support, openssl, and sha256sum or shasum.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
@@ -30,8 +30,11 @@ mermaidjs() {
 	actual="sha512-$(openssl dgst -sha512 -binary "$tmp/mermaid.tgz" | openssl base64 -A)"
 	[[ "$actual" == "$integrity" ]] || die "mermaid $version: tarball integrity $actual, registry says $integrity"
 	tar -xzf "$tmp/mermaid.tgz" -C "$tmp" package/dist/mermaid.min.js
-	install -m 0644 "$tmp/package/dist/mermaid.min.js" mermaid.min.js
-	echo "mermaid.min.js: mermaid $version"
+	# Embedded gzipped; -n leaves out the name and timestamp so that the same
+	# release always produces the same file.
+	gzip -9 -n -c "$tmp/package/dist/mermaid.min.js" >"$tmp/mermaid.min.js.gz"
+	install -m 0644 "$tmp/mermaid.min.js.gz" mermaid.min.js.gz
+	echo "mermaid.min.js.gz: mermaid $version"
 }
 
 mermanwasm() {

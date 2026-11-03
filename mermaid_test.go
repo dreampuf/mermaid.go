@@ -20,8 +20,20 @@ import (
 )
 
 // renderTimeout bounds engine startup in the subtests that launch their own
-// browser; chrome plus the 3.5MB mermaid bundle is slow under -race.
+// browser; chrome plus the multi-megabyte mermaid bundle is slow under -race.
 var renderTimeout = 60 * time.Second
+
+// TestMermaidJS guards the embedded bundle: MermaidJS panics if it does not
+// decompress, so a corrupt or truncated mermaid.min.js.gz must fail here.
+func TestMermaidJS(t *testing.T) {
+	js := MermaidJS()
+	if len(js) < 1<<20 || !strings.Contains(js, "mermaid") {
+		t.Fatalf("MermaidJS() = %d bytes, want the mermaid.js bundle", len(js))
+	}
+	if again := MermaidJS(); again != js {
+		t.Error("MermaidJS() returned a different bundle on the second call")
+	}
+}
 
 func TestRenderEngine_Render(t *testing.T) {
 	cases := []struct {
@@ -260,13 +272,17 @@ Class08 <--> C2: Cool label`},
 		}
 	})
 
-	t.Run("NoBundleFailsBeforeLaunchingChrome", func(t *testing.T) {
+	t.Run("SourceMermaidOverridesEmbeddedBundle", func(t *testing.T) {
 		source := SourceMermaid
-		SourceMermaid = ""
+		// A stub whose mermaid is a function: only it, not the embedded
+		// bundle, makes the readiness check see typeof mermaid = "function".
+		SourceMermaid = "var mermaid = function() {}; mermaid.initialize = function() {};"
 		defer func() { SourceMermaid = source }()
-		engine, err := NewRenderEngine(context.Background(), nil)
-		if !errors.Is(err, ErrMermaidNotReady) || engine != nil {
-			t.Errorf("NewRenderEngine() without a bundle = %v, %v, want ErrMermaidNotReady", engine, err)
+		ctx, cancel := context.WithTimeout(context.Background(), renderTimeout)
+		defer cancel()
+		engine, err := NewRenderEngine(ctx, nil)
+		if !errors.Is(err, ErrMermaidNotReady) || !strings.Contains(err.Error(), `"function"`) || engine != nil {
+			t.Errorf("NewRenderEngine() with a stub bundle = %v, %v, want ErrMermaidNotReady naming \"function\"", engine, err)
 		}
 	})
 

@@ -34,13 +34,17 @@
 package mermaid_go
 
 import (
+	"bytes"
+	"compress/gzip"
 	"context"
 	_ "embed"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"iter"
 	"os/exec"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -53,12 +57,56 @@ import (
 	"github.com/dreampuf/mermaid.go/internal/render"
 )
 
-// SourceMermaid is the mermaid.js bundle NewRenderEngine loads into the page,
-// the release embedded in this package unless the program assigns another. The
-// linker drops it from programs that never call NewRenderEngine.
-//
-//go:embed mermaid.min.js
+// SourceMermaid is a mermaid.js bundle for NewRenderEngine to load into the page
+// in place of the one embedded in this package. When it is empty, the default,
+// NewRenderEngine loads the embedded release, which MermaidJS returns.
 var SourceMermaid string
+
+// mermaidGzip is mermaid.min.js, gzipped to keep it out of the binary at full
+// size. Only embeddedMermaid refers to it, so the linker still drops it from
+// programs that never call NewRenderEngine or MermaidJS.
+//
+//go:embed mermaid.min.js.gz
+var mermaidGzip []byte
+
+var (
+	embeddedOnce sync.Once
+	embeddedJS   string
+	embeddedErr  error
+)
+
+// embeddedMermaid decompresses the embedded bundle the first time it is asked
+// for and keeps the result for the life of the process. The once lives here,
+// not in a package-level initializer, so that only callers keep the data alive.
+func embeddedMermaid() (string, error) {
+	embeddedOnce.Do(func() {
+		zr, err := gzip.NewReader(bytes.NewReader(mermaidGzip))
+		if err != nil {
+			embeddedErr = fmt.Errorf("decompress embedded mermaid.js: %w", err)
+			return
+		}
+		var sb strings.Builder
+		sb.Grow(6 << 20)
+		if _, err := io.Copy(&sb, zr); err != nil {
+			embeddedErr = fmt.Errorf("decompress embedded mermaid.js: %w", err)
+			return
+		}
+		embeddedJS = sb.String()
+	})
+	return embeddedJS, embeddedErr
+}
+
+// MermaidJS returns the mermaid.js bundle embedded in this package, the one
+// NewRenderEngine loads when SourceMermaid is empty. It is decompressed on the
+// first call and kept for the life of the process. It panics only if the
+// embedded data is corrupt, which a test guards against.
+func MermaidJS() string {
+	js, err := embeddedMermaid()
+	if err != nil {
+		panic(err)
+	}
+	return js
+}
 
 var DefaultPage = `data:text/html,<!DOCTYPE html>
 <html lang="en">
@@ -74,7 +122,7 @@ const DefaultRenderTimeout = 30 * time.Second
 // DefaultStartupTimeout bounds loading mermaid.js and running the caller's
 // statements in NewRenderEngine when the supplied context has no deadline of its
 // own. Nothing in chromedp bounds that work, so without this the evaluation of
-// the embedded 3.5MB bundle could hang indefinitely. Pass a context with a
+// the embedded multi-megabyte bundle could hang indefinitely. Pass a context with a
 // deadline to choose a different bound.
 const DefaultStartupTimeout = 60 * time.Second
 
@@ -167,8 +215,13 @@ func NewRenderEngine(ctx context.Context, statements []string, options ...chrome
 	)
 
 	// Fail before launching a browser that could never render anything.
-	if SourceMermaid == "" {
-		return nil, fmt.Errorf("%w: SourceMermaid is empty", ErrMermaidNotReady)
+	source := SourceMermaid
+	if source == "" {
+		js, err := embeddedMermaid()
+		if err != nil {
+			return nil, fmt.Errorf("%w: %w", ErrMermaidNotReady, err)
+		}
+		source = js
 	}
 
 	args := make([]chromedp.ExecAllocatorOption, 0, len(chromedp.DefaultExecAllocatorOptions)+len(options)+1)
@@ -203,7 +256,7 @@ func NewRenderEngine(ctx context.Context, statements []string, options ...chrome
 		// object graph -- and ship it to us only for Void to discard it here.
 		// Decline it instead. Overriding the option is enough because Evaluate
 		// applies opts after its own default.
-		chromedp.Evaluate[chromedp.Void](SourceMermaid, func(p *runtime.EvaluateParams) {
+		chromedp.Evaluate[chromedp.Void](source, func(p *runtime.EvaluateParams) {
 			p.ReturnByValue = new(false)
 		}),
 		chromedp.Evaluate[chromedp.Void]("mermaid.initialize({startOnLoad:false})"),
