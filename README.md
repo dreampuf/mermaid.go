@@ -21,8 +21,8 @@ binary, no cgo.
 go get -u github.com/dreampuf/mermaid.go
 ```
 
-The root package holds the chrome backend, with `mermaid.min.js` embedded, and the merman CLI
-backend. The WebAssembly backend lives in its own package, so only programs that import it link
+The root package holds the chrome backend, with `mermaid.min.js` embedded gzipped (1.6 MB rather
+than 5.2 MB, decompressed once when the first engine starts), and the merman CLI backend. The WebAssembly backend lives in its own package, so only programs that import it link
 wazero and the 15 MB module:
 
 ```go
@@ -65,8 +65,9 @@ sequenceDiagram
 ## API Overview
 
 ### `NewRenderEngine(ctx context.Context, statements []string, options ...chromedp.ExecAllocatorOption) (*RenderEngine, error)`
-Initializes a new render engine by launching a headless browser and loading the embedded `mermaid.js`
-from `SourceMermaid`.
+Initializes a new render engine by launching a headless browser and loading `mermaid.js`: the bundle
+assigned to `SourceMermaid`, or, when that is empty (the default), the release embedded in this
+package, which `MermaidJS()` returns.
 - `statements`: Optional JavaScript statements to execute during initialization (e.g., custom mermaid configuration).
 - `options`: Variadic list of `chromedp` allocator options.
 
