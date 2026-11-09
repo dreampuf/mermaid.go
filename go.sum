@@ -1,5 +1,5 @@
-github.com/chromedp/cdproto v0.159.1 h1:k0ACb4pnDcuz30dgr1kdou0t0U+VW/4HDQm17mOdXxo=
-github.com/chromedp/cdproto v0.159.1/go.mod h1:h68JaIuFr9o3yiayxEYhBdvaxgYO3shDrPSYhNlyfu0=
+github.com/chromedp/cdproto v0.159.2 h1:tKn8DG0Nx5+ZfPSxQMm4KtCR9onPrF4kCify/oZQYNQ=
+github.com/chromedp/cdproto v0.159.2/go.mod h1:h68JaIuFr9o3yiayxEYhBdvaxgYO3shDrPSYhNlyfu0=
 github.com/chromedp/chromedp v0.23.0 h1:iNGzFz+exVgG4OynS2CnYzlAjHiOFW++fUPbbmSwy0w=
 github.com/chromedp/chromedp v0.23.0/go.mod h1:hJcPsoPrgxu4ulIXhO1WmtKjosCD8jbZh0+TeVFsod8=
 github.com/go-json-experiment/json v0.0.0-20260213210345-44df1a37e875 h1:XGPtjxqp0FS8jj1Z7QGcSOSgyq1fUPjNyJXvi3KfI4A=
