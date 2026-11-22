@@ -1,19 +1,21 @@
 # Corresponding source
 
-Source commit: `3b915f69c02d55b873d252cf6c8a6048e7f3427d`.
+Source commit: `2ce0fa4589f13c6c80c4e0be9d3292eedfbc4471`.
 
-Repository: https://github.com/Latias94/merman/tree/3b915f69c02d55b873d252cf6c8a6048e7f3427d
+Repository: https://github.com/Latias94/merman/tree/2ce0fa4589f13c6c80c4e0be9d3292eedfbc4471
 
 Retrieve the exact source, not a moving branch:
 
 ```text
 git clone https://github.com/Latias94/merman.git
-git -C merman checkout --detach 3b915f69c02d55b873d252cf6c8a6048e7f3427d
+git -C merman checkout --detach 2ce0fa4589f13c6c80c4e0be9d3292eedfbc4471
 ```
 
 - `Cargo.lock`
 - `crates/merman-wasi/Cargo.toml`
 - `crates/merman`
+- `crates/merman-model`
+- `crates/merman-markup`
 - `crates/merman-render`
 - `crates/merman-export`
 

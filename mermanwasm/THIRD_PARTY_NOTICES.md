@@ -8,7 +8,7 @@ The wrapper and Merman-authored code remain under the project license; each comp
 
 - ID: `sdk-standard`
 - Description: Embedding SDK standard legal closure.
-- Components: `cose-base-v1`, `cose-base-v2`, `cytoscape`, `cytoscape-cose-bilkent`, `cytoscape-fcose`, `d3-shape`, `dagre`, `dompurify`, `fmin`, `graphlib`, `layout-base-v1`, `layout-base-v2`, `mermaid`, `non-layered-tidy-tree-layout`, `rough-rs`, `roughjs`, `sanitize-url`, `unicode-linebreak`, `venn-js`, `zenuml-core`, `sdk-cousine`
+- Components: `cose-base-v1`, `cose-base-v2`, `cytoscape`, `cytoscape-cose-bilkent`, `cytoscape-fcose`, `d3-path`, `d3-shape`, `dagre`, `dompurify`, `fmin`, `graphlib`, `layout-base-v1`, `layout-base-v2`, `mermaid`, `non-layered-tidy-tree-layout`, `rough-rs`, `roughjs`, `roxmltree-dom`, `sanitize-url`, `unicode-linebreak`, `venn-js`, `zenuml-core`, `sdk-cousine`, `usvg`
 
 ## Components
 
@@ -40,8 +40,8 @@ Manatee contains Rust translations and adaptations of the newer CoSE base behavi
 
 Architecture layout and styling use source-backed Cytoscape behavior and defaults.
 
-- Version: `3.34.0`
-- Source: https://github.com/cytoscape/cytoscape.js.git @ `22716bfb75834b56fa6679648b0abb06f4ae691c`
+- Version: `3.34.4`
+- Source: https://github.com/cytoscape/cytoscape.js.git @ `e394aa858b0699a67be8f9ab426823ae1aae7813`
 - Source path: `.`
 - Relationship: `behavior-reference`, `translated`
 - License: `MIT`
@@ -72,9 +72,21 @@ The headless Architecture layout is a modified Rust implementation of FCoSE beha
 - Local evidence: `crates/manatee`, `crates/merman-render/src/architecture.rs`
 - Legal file: `THIRD_PARTY_LICENSES/cytoscape-fcose/LICENSE`
 
+### d3-path
+
+The Pie SVG renderer translates D3 path rounding and arc serialization, including the 3.1.1 correction for rounded coincident endpoints of large arcs.
+
+- Version: `3.1.1`
+- Source: https://github.com/d3/d3-path.git @ `b9ab34592535861e44ce9db03de4db2c2c9c866a`
+- Source path: `src/path.js`
+- Relationship: `modified`, `translated`
+- License: `ISC`
+- Local evidence: `crates/merman-render/src/svg/parity/pie/render.rs`
+- Legal file: `THIRD_PARTY_LICENSES/d3-path/LICENSE`
+
 ### d3-shape
 
-The SVG parity layer translates D3 curve algorithms, including basis, natural, step, cardinal, bump, and Catmull-Rom variants.
+The SVG parity layer translates D3 curve algorithms, including basis, natural, step, cardinal, bump, and Catmull-Rom variants. The current reference graph uses d3-shape 3.2.1, whose curve source is unchanged from this translation baseline.
 
 - Version: `3.2.0`
 - Source: https://github.com/d3/d3-shape.git @ `8ec82658454750cfa29efb1e0ea514e3dd9b2297`
@@ -105,7 +117,7 @@ Merman selects DOMPurify's Apache-2.0 option for generated sanitizer defaults; t
 - Source path: `.`
 - Relationship: `generated`, `translated`
 - License: `(Apache-2.0 OR MPL-2.0)`
-- Local evidence: `crates/merman-core/src/generated/dompurify_defaults.rs`
+- Local evidence: `crates/merman-markup/src/generated/dompurify_defaults.rs`
 - Legal file: `THIRD_PARTY_LICENSES/dompurify/LICENSE`
 
 ### fmin
@@ -160,12 +172,12 @@ Manatee also follows the newer layout-base behavior selected by the FCoSE depend
 
 Merman independently implements Mermaid-compatible behavior while translating selected algorithms, generating defaults, copying architecture icon data, and retaining upstream fixtures and snapshots.
 
-- Version: `12.1.0`
-- Source: https://github.com/mermaid-js/mermaid.git @ `21f72f07ea22c0af48a3149c550654e80d8e40cb`
+- Version: `12.3.0`
+- Source: https://github.com/mermaid-js/mermaid.git @ `2086904e76c692331e34a45d7cc3bc30860d040e`
 - Source path: `packages/mermaid`
 - Relationship: `behavior-reference`, `copied`, `fixtures`, `generated`, `modified`, `translated`
 - License: `MIT`
-- Local evidence: `crates/merman-core/src`, `crates/merman-render/src`, `crates/merman-render/src/svg/parity/architecture/icons.rs`, `fixtures`
+- Local evidence: `crates/merman-core/src`, `crates/merman-model/src`, `crates/merman-markup/src`, `crates/merman-render/src`, `crates/merman-render/src/svg/parity/architecture/icons.rs`, `fixtures`
 - Legal file: `THIRD_PARTY_LICENSES/mermaid/LICENSE`
 
 ### non-layered-tidy-tree-layout
@@ -204,16 +216,30 @@ The roughr fork aligns its randomization and drawing-operation semantics with Ro
 - Local evidence: `crates/roughr`
 - Legal file: `THIRD_PARTY_LICENSES/roughjs/LICENSE`
 
+### roxmltree private XML DOM
+
+The renderer privately imports roxmltree 0.21.1 with its official iterative element parsing fix so accepted deep XHTML does not exhaust the call stack. Namespace, entity, source-range and DOM semantics are retained. The adapted tree derives from ego-tree under ISC; roxmltree offers MIT or Apache-2.0 and this distribution selects MIT.
+
+- Version: `0.21.1 with upstream iterative element fix`
+- Source: https://github.com/RazrFalcon/roxmltree @ `3f5c78dea57662b43a2f41961397b1f5ffe27166`
+- Source path: `src`
+- Relationship: `copied`, `modified`
+- License: `MIT AND ISC`
+- Local evidence: `crates/merman-render/src/xml_dom`
+- Legal file: `THIRD_PARTY_LICENSES/roxmltree-dom/LICENSE-MIT`
+- Legal file: `THIRD_PARTY_LICENSES/roxmltree-dom/LICENSE-ISC`
+- Legal file: `THIRD_PARTY_LICENSES/roxmltree-dom/LICENSE-APACHE`
+
 ### sanitize-url
 
 Merman's URL sanitization behavior is a source-backed Rust translation of sanitize-url.
 
-- Version: `7.1.1`
-- Source: https://github.com/braintree/sanitize-url.git @ `b1e8d50e4066a9af00fa042176676374747f754b`
+- Version: `7.1.2`
+- Source: https://github.com/braintree/sanitize-url.git @ `206cb8b942b10dad28dd3d31db3bf39e3fcdd7aa`
 - Source path: `src`
 - Relationship: `modified`, `translated`
 - License: `MIT`
-- Local evidence: `crates/merman-core/src/utils.rs`
+- Local evidence: `crates/merman-markup/src/url.rs`
 - Legal file: `THIRD_PARTY_LICENSES/sanitize-url/LICENSE`
 
 ### unicode-linebreak
@@ -263,3 +289,16 @@ The optional bundled-fonts capability embeds unmodified Cousine Regular, Bold an
 - License: `OFL-1.1`
 - Local evidence: `crates/merman-export/assets/fonts`
 - Legal file: `THIRD_PARTY_LICENSES/sdk-cousine/OFL.txt`
+
+### usvg
+
+Source-tree builds of the native font and image export pipeline link usvg 0.47.0 with a local font fallback backport. This source component carries the two upstream license texts.
+
+- Version: `0.47.0 with font fallback backport`
+- Source: https://github.com/linebender/resvg @ `3a0fdba53ccf2d346b54cc53ba7adf0ee60d0707`
+- Source path: `crates/usvg`
+- Relationship: `copied`, `modified`, `linked`
+- License: `Apache-2.0 OR MIT`
+- Local evidence: `vendor/usvg`
+- Legal file: `THIRD_PARTY_LICENSES/usvg/LICENSE-APACHE`
+- Legal file: `THIRD_PARTY_LICENSES/usvg/LICENSE-MIT`

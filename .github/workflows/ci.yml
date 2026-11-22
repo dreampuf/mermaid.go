@@ -57,7 +57,7 @@ jobs:
     # covered by the scripted binary in the tests.
     - name: Install merman-cli
       env:
-        MERMAN_VERSION: v0.9.3
+        MERMAN_VERSION: v0.11.0
         MERMAN_TARGET: x86_64-unknown-linux-gnu
       run: |
         set -euo pipefail
