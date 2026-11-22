@@ -156,11 +156,11 @@ func WithSiteConfig(config []byte) Option {
 
 // WithOptions merges a JSON object into the merman binding options the
 // engine is constructed with, for the parts of the schema this package does not
-// model -- resource profiles and limits, layout viewport sizes, presentation
+// model -- resource profiles and limits, layout viewport sizes, merman
 // themes and the like. Each top-level group is merged key by key over the one
 // built from the other options, so {"svg":{}} keeps the svg id; a group that is
-// not an object replaces it. The engine speaks options schema 2, the schema of
-// the merman 0.9 releases; see merman's docs/bindings/OPTIONS_JSON.md.
+// not an object replaces it. The engine speaks options schema 3, the schema of
+// the merman 0.10 and later releases; see merman's docs/bindings/OPTIONS_JSON.md.
 func WithOptions(options []byte) Option {
 	return func(c *engineConfig) { c.options = options }
 }
@@ -211,7 +211,7 @@ type catalogInfo struct {
 }
 
 // optionsSchema is the binding options schema this package writes.
-const optionsSchema = 2
+const optionsSchema = 3
 
 // New compiles the merman reactor and builds one instance from it, so a
 // missing or incompatible module is reported here, with

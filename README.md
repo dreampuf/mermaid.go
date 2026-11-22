@@ -298,7 +298,7 @@ passes, the engine closes and every later render fails with `ErrEngineClosed`. P
 
 ### merman versions
 
-CI pins **0.9.3**, whose Mermaid baseline is 12.1.0. Releases back to 0.7.0 are supported, the
+CI pins **0.11.0**, whose Mermaid baseline is 12.3.0. Releases back to 0.7.0 are supported, the
 ones before 0.8 through the probe's fallback path. Note that the linux binaries since 0.8 need glibc
 2.38 or newer — 0.7.0's run on older distributions.
 
@@ -382,7 +382,7 @@ deadline, so a timeout never spoils the engine.
 | `WithTheme(name)` | Mermaid theme. Takes precedence over a theme in the site configuration. |
 | `WithSiteConfig(json)` | A Mermaid configuration object, the in-memory counterpart of `WithMermanConfigFile`. |
 | `WithFont(bytes)` | A TrueType/OpenType font for text measurement and PNG painting, ahead of the bundled Cousine. Repeatable. Needed for CJK or emoji. |
-| `WithOptions(json)` | Raw merman binding options (schema 2), each group merged key by key over the one built from the other options, for what this package does not model: resource profiles and limits, viewport sizes, presentation themes. |
+| `WithOptions(json)` | Raw merman binding options (schema 3, merman 0.10 and later), each group merged key by key over the one built from the other options, for what this package does not model: resource profiles and limits, viewport sizes, themes. |
 | `WithConcurrency(n)` | How many instances, and so renders, at once. Default: `GOMAXPROCS`. |
 | `WithMemoryLimit(bytes)` | Linear memory cap per instance. Default: `DefaultMemoryLimit`, 512 MiB. |
 | `WithCompilationCache(cache)` | Shares compiled code between engines, and across processes with a directory-backed cache. |

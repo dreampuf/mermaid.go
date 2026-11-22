@@ -19,11 +19,11 @@ package mermanwasm
 import _ "embed"
 
 // Version is the merman release the module was taken from.
-const Version = "0.9.3"
+const Version = "0.11.0"
 
 // SHA256 is the module's checksum as merman's SDK manifest records it, so an
 // update can be checked against the release it claims to come from.
-const SHA256 = "4ebb5838ea82e30338edcb110d580b954a00a9e70eb64dde4f83b42a3aac6dcb"
+const SHA256 = "beb0cee5eb0b7f5569d2adda9d26a79712ed81372133fb3f83ca96b186738228"
 
 // Module is the embedded merman_wasi.wasm reactor, which New runs unless it is
 // given another.

@@ -405,12 +405,14 @@ func TestEngine_LivePng(t *testing.T) {
 }
 
 // slowMermanDiagram is a flowchart large enough that laying it out takes well
-// over the deadlines the interruption tests set.
+// over the deadlines the interruption tests set. Its 500 edges are as many as
+// Mermaid's default maxEdges allows, which merman enforces since 0.11 and which
+// its bindings do not let site configuration raise.
 func slowMermanDiagram() string {
 	var b strings.Builder
 	b.WriteString("graph TD\n")
-	for i := range 1500 {
-		fmt.Fprintf(&b, "N%d-->N%d\nN%d-->N%d\n", i, i+1, i, (i*7+3)%1500)
+	for i := range 250 {
+		fmt.Fprintf(&b, "N%d-->N%d\nN%d-->N%d\n", i, i+1, i, (i*7+3)%250)
 	}
 	return b.String()
 }
